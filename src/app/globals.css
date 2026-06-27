@@ -1,26 +1,66 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@config "../../tailwind.config.ts";
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* Base Body Styles */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #050505;
+  color: #FFFFFF;
+  font-family: var(--font-inter), sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings Styling */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-space-grotesk), sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* ::selection Styles */
+::selection {
+  background-color: rgba(0, 200, 232, 0.25);
+  color: #FFFFFF;
+}
+
+/* Custom Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0D0D0D;
+}
+::-webkit-scrollbar-thumb {
+  background: #2D2D2D;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00C8E8;
+}
+
+/* Reusable Component Classes */
+.btn-primary {
+  @apply bg-kca-cyan text-kca-black font-display font-bold px-6 py-3 rounded-lg transition-all duration-300 hover:bg-kca-cyan-bright shadow-[0_0_20px_rgba(0,200,232,0.15)] hover:shadow-[0_0_30px_rgba(0,200,232,0.30)] flex items-center justify-center gap-2 cursor-pointer;
+}
+
+.btn-secondary {
+  @apply border border-kca-cyan text-kca-cyan font-display font-semibold px-6 py-3 rounded-lg bg-transparent transition-all duration-300 hover:bg-kca-cyan/10 flex items-center justify-center gap-2 cursor-pointer;
+}
+
+.card {
+  @apply bg-kca-surface border border-kca-border rounded-xl p-6 transition-all duration-300 hover:border-kca-cyan hover:shadow-cyan-md hover:-translate-y-1;
+}
+
+.input-field {
+  @apply w-full bg-kca-black border border-kca-border text-kca-white px-4 py-3 rounded-lg focus:outline-none focus:border-kca-cyan focus:ring-1 focus:ring-kca-cyan transition-all duration-300;
+}
+
+.section-heading {
+  @apply font-display text-3xl md:text-4xl lg:text-5xl font-bold text-kca-white tracking-tight;
+}
+
+.section-subheading {
+  @apply text-base md:text-lg text-kca-gray-400 font-normal max-w-2xl;
 }
