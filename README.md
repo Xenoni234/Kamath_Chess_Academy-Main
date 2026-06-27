@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kamath Chess Academy Platform
 
-## Getting Started
+Phase 0 of the Kamath Chess Academy platform is a Next.js App Router application with the public website, authentication foundations, Prisma data model, role-gated dashboards, and health checks.
 
-First, run the development server:
+## Local Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Configure environment values:
+
+```bash
+cp .env.example .env.local
+```
+
+Set real Supabase PostgreSQL values for `DATABASE_URL` and `DIRECT_URL`, real Upstash values for `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, and strong JWT secrets.
+
+3. Push the Prisma schema:
+
+```bash
+npx prisma db push
+```
+
+4. Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/app/(public)` contains the finalized public website and placeholder legal pages.
+- `src/app/(auth)` contains login and registration pages.
+- `src/app/(dashboard)/dashboard` contains role-based dashboards at `/dashboard/student`, `/dashboard/parent`, `/dashboard/coach`, `/dashboard/hr`, and `/dashboard/head`.
+- `src/app/api` contains contact, health, and auth route handlers.
+- `src/lib` contains Prisma, Redis, auth, validation, and utility helpers.
+- `prisma/schema.prisma` defines the Phase 0 database model.
+- `src/proxy.ts` contains the Next 16 request gate for dashboard routes.
 
-## Learn More
+## Phase 0 Scope
 
-To learn more about Next.js, take a look at the following resources:
+Phase 0 includes database schema, auth routes, httpOnly token cookies, role-based dashboard shells, route protection, and health checks.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Future phases will add real OTP delivery, chess board workflows, Stockfish analysis, tournament/game logic, payments, realtime features, and external AI integrations.
