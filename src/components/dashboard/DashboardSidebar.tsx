@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, BookOpen, CalendarDays, CreditCard, HeartHandshake, Home, LogOut, Shield, Trophy, Users } from "lucide-react";
+import { BookOpen, Home, LogOut, Swords, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getSocket } from "@/lib/socket/client";
 
 type NavItem = {
   href: string;
@@ -12,38 +14,23 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const navByRole: Record<string, NavItem[]> = {
-  STUDENT: [
-    { href: "/dashboard/student", label: "Overview", icon: Home },
-    { href: "/dashboard/student", label: "Games", icon: Trophy },
-    { href: "/dashboard/student", label: "Puzzles", icon: BookOpen },
-  ],
-  PARENT: [
-    { href: "/dashboard/parent", label: "Overview", icon: Home },
-    { href: "/dashboard/parent", label: "Progress", icon: BarChart3 },
-    { href: "/dashboard/parent", label: "Payments", icon: CreditCard },
-  ],
-  COACH: [
-    { href: "/dashboard/coach", label: "Overview", icon: Home },
-    { href: "/dashboard/coach", label: "Batches", icon: Users },
-    { href: "/dashboard/coach", label: "Classes", icon: CalendarDays },
-  ],
-  HR: [
-    { href: "/dashboard/hr", label: "Overview", icon: Home },
-    { href: "/dashboard/hr", label: "Students", icon: Users },
-    { href: "/dashboard/hr", label: "Operations", icon: HeartHandshake },
-  ],
-  HEAD: [
-    { href: "/dashboard/head", label: "Overview", icon: Home },
-    { href: "/dashboard/head", label: "Platform", icon: Shield },
-    { href: "/dashboard/hr", label: "HR View", icon: HeartHandshake },
-  ],
-};
-
 export default function DashboardSidebar({ username, role }: { username: string; role: string }) {
   const pathname = usePathname();
   const router = useRouter();
-  const navItems = navByRole[role] ?? navByRole.STUDENT;
+  const [onlineCount, setOnlineCount] = useState(0);
+
+  // Set up socket listener for online player count
+  useEffect(() => {
+    const socket = getSocket();
+
+    socket.on("presence:online-count", (count: number) => {
+      setOnlineCount(count);
+    });
+
+    return () => {
+      socket.off("presence:online-count");
+    };
+  }, []);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -51,8 +38,19 @@ export default function DashboardSidebar({ username, role }: { username: string;
     router.refresh();
   }
 
+  const roleLower = role.toLowerCase();
+
+  // Define sidebar items in order:
+  // Overview / Home -> Play -> Games -> Puzzles
+  const navItems: NavItem[] = [
+    { href: `/dashboard/${roleLower}`, label: "Overview", icon: Home },
+    { href: "/dashboard/play", label: "Play", icon: Swords },
+    { href: `/dashboard/${roleLower}`, label: "Games", icon: Trophy },
+    { href: `/dashboard/${roleLower}`, label: "Puzzles", icon: BookOpen },
+  ];
+
   return (
-    <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 md:w-72">
+    <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 md:w-72 select-none">
       <Link href="/" className="mb-8 flex items-center gap-3 rounded-xl border border-kca-border bg-kca-black p-3">
         <Image src="/kca-logo.png" alt="KCA" width={44} height={44} className="h-11 w-11 object-contain" />
         <div>
@@ -74,17 +72,26 @@ export default function DashboardSidebar({ username, role }: { username: string;
           const active = pathname === item.href;
 
           return (
-            <Link
-              key={`${item.label}-${item.href}`}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border-l-2 border-transparent px-4 py-3 text-sm font-semibold text-kca-gray-400 transition-all hover:bg-kca-surface-2 hover:text-kca-white",
-                active && "border-kca-cyan bg-kca-surface-2 text-kca-white"
+            <div key={`${item.label}-${item.href}`} className="flex flex-col">
+              <Link
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg border-l-2 border-transparent px-4 py-3 text-sm font-semibold text-kca-gray-400 transition-all hover:bg-kca-surface-2 hover:text-kca-white",
+                  active && "border-kca-cyan bg-kca-surface-2 text-kca-white"
+                )}
+              >
+                <Icon className="h-4 w-4 text-kca-cyan" />
+                {item.label}
+              </Link>
+              
+              {/* Online Player count dot widget directly below Play link */}
+              {item.label === "Play" && (
+                <div className="ml-9 mt-0.5 mb-1 text-xs text-kca-success font-semibold flex items-center gap-1.5 animate-pulse">
+                  <span className="h-1.5 w-1.5 rounded-full bg-kca-success" />
+                  <span>{onlineCount} online</span>
+                </div>
               )}
-            >
-              <Icon className="h-4 w-4 text-kca-cyan" />
-              {item.label}
-            </Link>
+            </div>
           );
         })}
       </nav>
