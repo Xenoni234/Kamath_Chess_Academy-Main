@@ -130,6 +130,7 @@ model OtpVerification {
   otpHash    String
   purpose    String
   expiresAt  DateTime
+  attempts   Int      @default(0)
   verifiedAt DateTime?
   createdAt  DateTime @default(now())
   user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -200,8 +201,17 @@ model Game {
   blackUserId String?
   pgn         String
   fen         String?
+  moves       String[]           @default([])
+  timeControl String?
   timeFormat  TimeFormat
   result      GameResult
+  termination String?
+  rated       Boolean            @default(false)
+  whiteTimeMs Int?
+  blackTimeMs Int?
+  incrementMs Int?
+  lastMoveAt  DateTime?
+  tournamentId String?
   source      GameSource         @default(PLATFORM)
   playedAt    DateTime           @default(now())
   createdAt   DateTime           @default(now())

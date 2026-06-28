@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
+import { verifyOtpCode } from "@/lib/otp";
 import { registerSchema } from "@/lib/validations";
 
 export async function POST(request: Request) {
@@ -20,16 +21,16 @@ export async function POST(request: Request) {
 
     const data = result.data;
 
-    if (process.env.NODE_ENV === 'development') {
-      // Dev bypass — accept 000000
-      if (body.otp !== '000000') {
-        return NextResponse.json({ error: 'Invalid OTP (dev: use 000000)' }, 
-                                 { status: 400 })
+    if (!(process.env.NODE_ENV === "development" && data.otp === "000000")) {
+      const otpResult = await verifyOtpCode({
+        email: data.email,
+        otp: data.otp,
+        purpose: "register",
+      });
+
+      if (!otpResult.success) {
+        return NextResponse.json({ success: false, message: otpResult.error }, { status: 400 });
       }
-    } else {
-      // Production OTP check goes here (Phase 1)
-      return NextResponse.json({ error: 'OTP service not configured' }, 
-                               { status: 503 })
     }
 
     const passwordHash = await hashPassword(data.password);
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
         mobile: data.mobile,
         passwordHash,
         role,
-        isVerified: process.env.NODE_ENV === "development",
+        isVerified: true,
         isActive: true,
         fideId: data.fideId || null,
         lichessId: data.lichessId || null,
