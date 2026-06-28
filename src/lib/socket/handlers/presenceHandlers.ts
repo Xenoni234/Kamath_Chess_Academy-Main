@@ -1,5 +1,6 @@
 import type { Server, Socket } from "socket.io";
 import { db } from "../../db.ts";
+import { redis } from "../../redis.ts";
 import type { ConnectedUsers } from "../server.ts";
 
 export async function setupPresenceHandlers(io: Server, socket: Socket, connectedUsers: ConnectedUsers) {
@@ -21,8 +22,19 @@ export async function setupPresenceHandlers(io: Server, socket: Socket, connecte
     username: user?.username ?? socket.data.username ?? "Unknown",
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
+    const userId = socket.data.userId as string;
     connectedUsers.delete(socket.id);
+    
+    // Remove from ALL format queues
+    await Promise.all(
+      ['BULLET', 'BLITZ', 'RAPID', 'CLASSICAL'].map(format =>
+        redis.zrem(`lobby:queue:${format}`, userId)
+      )
+    );
+    
     io.emit("presence:user-offline", { userId });
+    io.emit("presence:online-count", 
+      new Set(connectedUsers.values()).size);
   });
 }

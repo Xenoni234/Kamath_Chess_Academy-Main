@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Chess } from "chess.js";
 
 type MoveListProps = {
-  pgn: string;
+  moves: string[];
 };
 
 type MovePair = {
@@ -12,45 +13,40 @@ type MovePair = {
   black: string;
 };
 
-export default function MoveList({ pgn }: MoveListProps) {
+export default function MoveList({ moves = [] }: MoveListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Parse PGN into move pairs
-  const parsePgn = (pgnString: string): MovePair[] => {
-    if (!pgnString) return [];
+  // Parse moves into move pairs
+  const parseMoves = (uciMoves: string[]): MovePair[] => {
+    if (!uciMoves || uciMoves.length === 0) return [];
 
-    // Strip comments, annotations, and clean up spaces
-    const cleanPgn = pgnString.replace(/\{.*?\}/g, "").replace(/\s+/g, " ").trim();
-    const parts = cleanPgn.split(" ").filter(Boolean);
-
-    const moves: MovePair[] = [];
-    let currentPair: MovePair | null = null;
-
-    for (const part of parts) {
-      if (part.includes(".")) {
-        // e.g. "1." or "1.e4"
-        const num = parseInt(part);
-        const rest = part.split(".").pop() || "";
-        currentPair = { number: num, white: rest, black: "" };
-        moves.push(currentPair);
-      } else {
-        if (currentPair) {
-          if (!currentPair.white) {
-            currentPair.white = part;
-          } else if (!currentPair.black) {
-            currentPair.black = part;
-          }
-        } else {
-          // Fallback if no move number preceded (should not happen with standard chess.js PGN)
-          currentPair = { number: moves.length + 1, white: part, black: "" };
-          moves.push(currentPair);
-        }
+    const chess = new Chess();
+    const sanMoves = uciMoves.map((uci) => {
+      try {
+        const move = chess.move({
+          from: uci.slice(0, 2),
+          to: uci.slice(2, 4),
+          promotion: uci[4] || undefined,
+        });
+        return move?.san || uci;
+      } catch (e) {
+        console.error("Error parsing move:", uci, e);
+        return uci;
       }
+    });
+
+    const movePairs: MovePair[] = [];
+    for (let i = 0; i < sanMoves.length; i += 2) {
+      movePairs.push({
+        number: Math.floor(i / 2) + 1,
+        white: sanMoves[i],
+        black: sanMoves[i + 1] || "",
+      });
     }
-    return moves;
+    return movePairs;
   };
 
-  const movesList = parsePgn(pgn);
+  const movesList = parseMoves(moves);
   const totalMovesCount = movesList.length;
   const lastIndex = totalMovesCount - 1;
   const isWhiteLast = totalMovesCount > 0 && !movesList[lastIndex].black;
@@ -60,7 +56,7 @@ export default function MoveList({ pgn }: MoveListProps) {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [pgn]);
+  }, [moves]);
 
   return (
     <div

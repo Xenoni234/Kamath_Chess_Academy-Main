@@ -141,9 +141,10 @@ export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: C
     }
 
     await redis.zrem(key, userId, opponentId);
+    const isWhite = Math.random() > 0.5;
     const game = createGame({
-      whiteId: Math.random() > 0.5 ? userId : opponentId,
-      blackId: Math.random() > 0.5 ? opponentId : userId,
+      whiteId: isWhite ? userId : opponentId,
+      blackId: isWhite ? opponentId : userId,
       timeControl: payload.timeControl,
       rated: true,
     });

@@ -351,7 +351,7 @@ export default function GameRoomClient({
               </h3>
             </div>
             <div className="flex-1 overflow-y-auto p-4 bg-kca-black/10">
-              <MoveList pgn={pgn} />
+              <MoveList moves={game.moves || []} />
             </div>
           </div>
 

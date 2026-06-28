@@ -112,8 +112,8 @@ export default function ChessBoard({
           boardOrientation: orientation,
           onPieceDrop: handlePieceDrop,
           allowDragging: !disabled,
-          darkSquareStyle: { backgroundColor: "#0D0D0D" },
-          lightSquareStyle: { backgroundColor: "#1C1C1C" },
+          darkSquareStyle: { backgroundColor: "#1A1A1A" },
+          lightSquareStyle: { backgroundColor: "#2B2B2B" },
           squareStyles: customSquareStyles,
         }}
       />
