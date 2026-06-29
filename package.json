@@ -11,6 +11,7 @@
     "import:puzzles": "npx tsx scripts/importPuzzles.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.106.0",
     "@hookform/resolvers": "^5.4.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
@@ -21,6 +22,7 @@
     "chess.js": "^1.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "csv-parse": "^7.0.0",
     "date-fns": "^4.4.0",
     "glicko2": "^1.2.1",
     "jsonwebtoken": "^9.0.3",
@@ -29,6 +31,7 @@
     "next-auth": "^4.24.14",
     "pg": "^8.22.0",
     "prisma": "^7.8.0",
+    "puppeteer": "^25.2.1",
     "react": "19.2.4",
     "react-chessboard": "^5.10.0",
     "react-dom": "19.2.4",
