@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "NODE_ENV=production node server.mjs",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "import:puzzles": "npx tsx scripts/importPuzzles.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
