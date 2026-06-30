@@ -11,6 +11,7 @@ import ChessBoard from "@/components/chess/ChessBoard";
 import GameClock from "@/components/chess/GameClock";
 import MoveList from "@/components/chess/MoveList";
 import GameControls from "@/components/chess/GameControls";
+import { type GameState } from "@/lib/socket/gameEngine";
 
 type PlayerInfo = {
   username: string;
@@ -21,8 +22,8 @@ type GameRoomClientProps = {
   gameId: string;
   userId: string;
   username: string;
-  activeGame: any; // Initially loaded active game state (or null)
-  dbGame: any; // Initially loaded finished game state (or null)
+  activeGame: GameState | null; // Initially loaded active game state (or null)
+  dbGame: GameState | null; // Initially loaded finished game state (or null)
   isFinished: boolean;
   initialPlayers: {
     white: PlayerInfo;
@@ -42,7 +43,7 @@ export default function GameRoomClient({
   const router = useRouter();
 
   // Game state
-  const [game, setGame] = useState<any>(initialActiveGame || initialDbGame);
+  const [game, setGame] = useState<GameState>(initialActiveGame || initialDbGame!);
   const [fen, setFen] = useState<string>(game.fen);
   const [lastValidFen, setLastValidFen] = useState<string>(game.fen);
   const [pgn, setPgn] = useState<string>(game.pgn || "");
@@ -86,26 +87,32 @@ export default function GameRoomClient({
     };
   }, []);
 
-  // Fetch rating change when game ends
+  // Fetch rating change when game ends (with retries)
   const fetchRatingChange = async () => {
     if (fetchingRating) return;
     setFetchingRating(true);
-    try {
-      // Small delay to let DB write complete
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      const res = await fetch(`/api/games/${gameId}`);
-      const data = await res.json();
-      if (data.success && data.game) {
-        const record = data.game.records?.find((r: any) => r.userId === userId);
+
+    const maxRetries = 5;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Increasing delay to let DB write complete
+        await new Promise((resolve) => setTimeout(resolve, 800 + attempt * 600));
+        const res = await fetch(`/api/games/${gameId}`);
+        const data = await res.json();
+        const record = data.game.records?.find((r: { userId: string; ratingBefore: number; ratingAfter: number }) => r.userId === userId);
         if (record && record.ratingAfter !== null && record.ratingBefore !== null) {
           setRatingChange(record.ratingAfter - record.ratingBefore);
+          setFetchingRating(false);
+          return;
         }
+      } catch (e) {
+        console.error(`Error fetching rating change (attempt ${attempt + 1}):`, e);
       }
-    } catch (e) {
-      console.error("Error fetching rating change:", e);
-    } finally {
-      setFetchingRating(false);
     }
+
+    // All retries exhausted — show 0 change rather than stuck on "Calculating..."
+    setRatingChange(0);
+    setFetchingRating(false);
   };
 
   // Trigger rating fetch if game is already finished on load
@@ -126,7 +133,7 @@ export default function GameRoomClient({
     }
 
     // Handlers
-    socket.on("game:state", (state: any) => {
+    socket.on("game:state", (state: GameState) => {
       setGame(state);
       setFen(state.fen);
       setLastValidFen(state.fen);
@@ -138,7 +145,7 @@ export default function GameRoomClient({
       setBlackTime(state.blackTimeMs);
     });
 
-    socket.on("game:update", (state: any) => {
+    socket.on("game:update", (state: GameState) => {
       setGame(state);
       setFen(state.fen);
       setLastValidFen(state.fen);
@@ -150,7 +157,7 @@ export default function GameRoomClient({
       setBlackTime(state.blackTimeMs);
     });
 
-    socket.on("game:end", (state: any) => {
+    socket.on("game:end", (state: GameState) => {
       setGame(state);
       setFen(state.fen);
       setLastValidFen(state.fen);
@@ -167,7 +174,7 @@ export default function GameRoomClient({
       }
     });
 
-    socket.on("game:draw-offered", (payload: any) => {
+    socket.on("game:draw-offered", (payload: { gameId: string; offeredBy: string }) => {
       if (payload.offeredBy !== userId) {
         setDrawOffer(payload);
       }

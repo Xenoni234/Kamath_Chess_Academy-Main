@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { TimeFormat } from "@prisma/client";
+import { type GameState } from "@/lib/socket/gameEngine";
 import { getGameFromRedis } from "@/lib/socket/gameEngine";
 import GameRoomClient from "./GameRoomClient";
 
@@ -87,7 +89,7 @@ export default async function GameRoomPage(context: { params: Promise<{ gameId: 
       userId={userId}
       username={username}
       activeGame={activeGame}
-      dbGame={dbGame}
+      dbGame={dbGame as unknown as GameState}
       isFinished={isFinished}
       initialPlayers={{
         white: { username: initialWhiteUsername, rating: initialWhiteRating },

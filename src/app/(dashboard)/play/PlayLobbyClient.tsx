@@ -336,7 +336,7 @@ export default function PlayLobbyClient({ userId, username, allUsers }: PlayLobb
                 {["white", "random", "black"].map((c) => (
                   <button
                     key={c}
-                    onClick={() => setCreateColor(c as any)}
+                    onClick={() => setCreateColor(c as 'white' | 'black' | 'random')}
                     className={cn(
                       "py-2 text-xs font-semibold rounded border capitalize transition-all duration-300 cursor-pointer",
                       createColor === c

@@ -2,22 +2,21 @@ import bcrypt from "bcryptjs";
 import { Resend } from "resend";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-
-type OtpPurpose = "register" | "login";
-
-function isPurpose(value: unknown): value is OtpPurpose {
-  return value === "register" || value === "login";
-}
+import { otpSendSchema } from "@/lib/validations/phase2";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const email = typeof body.email === "string" ? body.email.toLowerCase() : "";
-    const purpose = body.purpose;
+    const parsed = otpSendSchema.safeParse(body);
 
-    if (!email || !isPurpose(purpose)) {
-      return NextResponse.json({ success: false, error: "Invalid request" }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, error: parsed.error.issues[0].message },
+        { status: 400 }
+      );
     }
+
+    const { email, purpose } = parsed.data;
 
     const since = new Date(Date.now() - 60 * 60 * 1000);
     const requestsLastHour = await db.otpVerification.count({

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
-import { Chess } from "chess.js";
 
 type ChessBoardProps = {
   fen: string;
@@ -82,7 +82,7 @@ export default function ChessBoard({
     if (isPawn && isPromotionRank) {
       // Validate that there is a legal move from source to target
       try {
-        const moves = game.moves({ square: sourceSquare as any, verbose: true });
+        const moves = game.moves({ square: sourceSquare as Square, verbose: true });
         const isLegal = moves.some((m) => m.to === targetSquare);
         if (isLegal) {
           setPendingPromotion({ from: sourceSquare, to: targetSquare });
@@ -112,8 +112,8 @@ export default function ChessBoard({
           boardOrientation: orientation,
           onPieceDrop: handlePieceDrop,
           allowDragging: !disabled,
-          darkSquareStyle: { backgroundColor: "#1A1A1A" },
-          lightSquareStyle: { backgroundColor: "#2B2B2B" },
+          darkSquareStyle: { backgroundColor: "#769656" },
+          lightSquareStyle: { backgroundColor: "#EEEED2" },
           squareStyles: customSquareStyles,
         }}
       />

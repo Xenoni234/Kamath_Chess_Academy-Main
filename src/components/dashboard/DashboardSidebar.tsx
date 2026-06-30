@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, Home, LogOut, Swords, Trophy } from "lucide-react";
+import { BookOpen, Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
 
@@ -44,9 +44,13 @@ export default function DashboardSidebar({ username, role }: { username: string;
   // Overview / Home -> Play -> Games -> Puzzles
   const navItems: NavItem[] = [
     { href: `/dashboard/${roleLower}`, label: "Overview", icon: Home },
-    { href: "/dashboard/play", label: "Play", icon: Swords },
+    { href: "/dashboard/play", label: "Play vs Human", icon: Swords },
+    { href: "/dashboard/play-engine", label: "Play Engine", icon: Bot },
+    { href: "/dashboard/analysis", label: "Analysis", icon: Activity },
+    { href: "/dashboard/puzzles", label: "Puzzles", icon: Puzzle },
+    { href: "/dashboard/openings", label: "Openings", icon: Map },
+    { href: "/dashboard/reports", label: "Reports", icon: FileText },
     { href: `/dashboard/${roleLower}`, label: "Games", icon: Trophy },
-    { href: `/dashboard/${roleLower}`, label: "Puzzles", icon: BookOpen },
   ];
 
   return (
@@ -85,7 +89,7 @@ export default function DashboardSidebar({ username, role }: { username: string;
               </Link>
               
               {/* Online Player count dot widget directly below Play link */}
-              {item.label === "Play" && (
+              {item.label === "Play vs Human" && (
                 <div className="ml-9 mt-0.5 mb-1 text-xs text-kca-success font-semibold flex items-center gap-1.5 animate-pulse">
                   <span className="h-1.5 w-1.5 rounded-full bg-kca-success" />
                   <span>{onlineCount} online</span>

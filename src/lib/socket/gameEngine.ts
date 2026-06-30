@@ -17,6 +17,8 @@ export type GameState = {
   status: "waiting" | "ongoing" | "finished" | "aborted";
   result?: "white" | "black" | "draw";
   terminatedBy?: string;
+  termination?: string;
+  drawOfferedBy?: string;
   whiteTimeMs: number;
   blackTimeMs: number;
   incrementMs: number;
@@ -218,6 +220,7 @@ export async function finalizeGame(gameState: GameState, io: Server): Promise<vo
 
   io.to(gameKey(finalState.gameId)).emit("game:end", finalState);
   setTimeout(() => {
-    void redis.del(gameKey(finalState.gameId));
+    redis.del(gameKey(finalState.gameId)).catch(err =>
+      console.error("Failed to clean up game from Redis:", err));
   }, 5 * 60_000);
 }

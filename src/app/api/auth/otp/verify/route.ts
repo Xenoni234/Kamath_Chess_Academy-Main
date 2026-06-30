@@ -1,22 +1,20 @@
 import { NextResponse } from "next/server";
 import { verifyOtpCode } from "@/lib/otp";
-
-type OtpPurpose = "register" | "login";
-
-function isPurpose(value: unknown): value is OtpPurpose {
-  return value === "register" || value === "login";
-}
+import { otpVerifySchema } from "@/lib/validations/phase2";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const email = typeof body.email === "string" ? body.email.toLowerCase() : "";
-    const otp = typeof body.otp === "string" ? body.otp : "";
-    const purpose = body.purpose;
+    const parsed = otpVerifySchema.safeParse(body);
 
-    if (!email || !otp || !isPurpose(purpose)) {
-      return NextResponse.json({ success: false, error: "Invalid request" }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, error: parsed.error.issues[0].message },
+        { status: 400 }
+      );
     }
+
+    const { email, otp, purpose } = parsed.data;
 
     const result = await verifyOtpCode({ email, otp, purpose });
     return NextResponse.json(result, { status: result.success ? 200 : 400 });

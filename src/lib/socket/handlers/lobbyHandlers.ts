@@ -5,6 +5,7 @@ import { db } from "../../db.ts";
 import { redis } from "../../redis.ts";
 import { createGame, deriveFormat, saveGameToRedis, type GameState } from "../gameEngine.ts";
 import type { ConnectedUsers } from "../server.ts";
+import { challengeIdSchema, createChallengeSchema, quickPairSchema } from "../../validations/socket.ts";
 
 type Challenge = {
   challengeId: string;
@@ -80,9 +81,13 @@ async function getRating(userId: string, format: keyof typeof TimeFormat) {
 export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: ConnectedUsers) {
   void getChallenges().then((challenges) => {
     socket.emit("lobby:challenges", challenges);
-  });
+  }).catch((err) => console.error("Failed to broadcast challenges:", err));
 
-  socket.on("lobby:create-challenge", async (payload: { timeControl: string; color: Challenge["color"]; rated: boolean }) => {
+  socket.on("lobby:create-challenge", async (rawPayload: unknown) => {
+    const parsed = createChallengeSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("lobby:error", { message: "Invalid payload" });
+    const payload = parsed.data;
+    
     const challenge: Challenge = {
       challengeId: uuidv4(),
       creatorId: socket.data.userId,
@@ -96,12 +101,31 @@ export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: C
     await broadcastChallenges(io);
   });
 
-  socket.on("lobby:cancel-challenge", async (payload: { challengeId: string }) => {
+  socket.on("lobby:cancel-challenge", async (rawPayload: unknown) => {
+    const parsed = challengeIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("lobby:error", { message: "Invalid payload" });
+    const payload = parsed.data;
+
+    const value = await redis.hget<string | Challenge>(CHALLENGES_KEY, payload.challengeId);
+    if (!value) return;
+    
+    const challenge = typeof value === "string" ? JSON.parse(value) as Challenge : value;
+    const userId = socket.data.userId as string;
+    
+    if (challenge.creatorId !== userId) {
+      socket.emit("lobby:error", { message: "You can only cancel your own challenges." });
+      return;
+    }
+    
     await redis.hdel(CHALLENGES_KEY, payload.challengeId);
     await broadcastChallenges(io);
   });
 
-  socket.on("lobby:accept-challenge", async (payload: { challengeId: string }) => {
+  socket.on("lobby:accept-challenge", async (rawPayload: unknown) => {
+    const parsed = challengeIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("lobby:error", { message: "Invalid payload" });
+    const payload = parsed.data;
+
     const value = await redis.hget<string | Challenge>(CHALLENGES_KEY, payload.challengeId);
     if (!value) return;
 
@@ -126,7 +150,11 @@ export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: C
     await broadcastChallenges(io);
   });
 
-  socket.on("lobby:quick-pair", async (payload: { timeControl: string }) => {
+  socket.on("lobby:quick-pair", async (rawPayload: unknown) => {
+    const parsed = quickPairSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("lobby:error", { message: "Invalid payload" });
+    const payload = parsed.data;
+
     const userId = socket.data.userId as string;
     const format = deriveFormat(payload.timeControl);
     const key = queueKey(format);
@@ -153,7 +181,11 @@ export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: C
     await emitGameReady(io, connectedUsers, game);
   });
 
-  socket.on("lobby:cancel-quick-pair", async (payload: { timeControl: string }) => {
+  socket.on("lobby:cancel-quick-pair", async (rawPayload: unknown) => {
+    const parsed = quickPairSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("lobby:error", { message: "Invalid payload" });
+    const payload = parsed.data;
+
     await redis.zrem(queueKey(deriveFormat(payload.timeControl)), socket.data.userId as string);
   });
 }

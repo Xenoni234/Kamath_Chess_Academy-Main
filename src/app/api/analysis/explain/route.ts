@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
 import { streamChessMoveExplanation, type ChessMoveExplanationParams } from "@/lib/claude";
+import { explainMoveSchema } from "@/lib/validations/phase2";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const payload = verifyAccessToken(token);
-    const params = (await request.json()) as ChessMoveExplanationParams;
+    const body = await request.json();
+    const parsed = explainMoveSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, message: "Invalid request payload" }, { status: 400 });
+    }
+    const params = parsed.data;
     const key = `rate:analysis:${payload.userId}`;
     const count = await redis.incr(key);
 

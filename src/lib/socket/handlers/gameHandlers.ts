@@ -9,6 +9,7 @@ import {
   validateMove,
   type GameState,
 } from "../gameEngine.ts";
+import { gameIdSchema, gameMoveSchema } from "../../validations/socket.ts";
 
 function room(gameId: string) {
   return `game:${gameId}`;
@@ -35,12 +36,15 @@ async function endAbortedGame(game: GameState, io: Server) {
   await saveGameToRedis(finalState);
   io.to(room(game.gameId)).emit("game:end", finalState);
   setTimeout(() => {
-    void redis.del(room(game.gameId));
+    redis.del(room(game.gameId)).catch((err) => console.error("Failed to clean up game from Redis:", err));
   }, 5 * 60_000);
 }
 
 export function setupGameHandlers(io: Server, socket: Socket) {
-  socket.on("game:join", async (payload: { gameId: string }) => {
+  socket.on("game:join", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("game:error", { message: "Invalid payload" });
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
 
@@ -53,7 +57,10 @@ export function setupGameHandlers(io: Server, socket: Socket) {
     socket.emit("game:state", game);
   });
 
-  socket.on("game:spectate", async (payload: { gameId: string }) => {
+  socket.on("game:spectate", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("game:error", { message: "Invalid payload" });
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
 
     if (!game) {
@@ -65,7 +72,10 @@ export function setupGameHandlers(io: Server, socket: Socket) {
     socket.emit("game:state", { ...game, spectator: true });
   });
 
-  socket.on("game:move", async (payload: { gameId: string; from: string; to: string; promotion?: string }) => {
+  socket.on("game:move", async (rawPayload: unknown) => {
+    const parsed = gameMoveSchema.safeParse(rawPayload);
+    if (!parsed.success) return socket.emit("game:move-invalid", { message: "Invalid payload" });
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
 
@@ -137,7 +147,10 @@ export function setupGameHandlers(io: Server, socket: Socket) {
     io.to(room(game.gameId)).emit("game:update", nextGame);
   });
 
-  socket.on("game:resign", async (payload: { gameId: string }) => {
+  socket.on("game:resign", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
 
@@ -153,31 +166,52 @@ export function setupGameHandlers(io: Server, socket: Socket) {
     );
   });
 
-  socket.on("game:draw-offer", async (payload: { gameId: string }) => {
+  socket.on("game:draw-offer", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
     if (!game || !isPlayer(game, userId)) return;
 
+    const updated = { ...game, drawOfferedBy: userId };
+    await saveGameToRedis(updated);
     socket.to(room(game.gameId)).emit("game:draw-offered", { gameId: game.gameId, offeredBy: userId });
   });
 
-  socket.on("game:draw-accept", async (payload: { gameId: string }) => {
+  socket.on("game:draw-accept", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
     if (!game || !isPlayer(game, userId)) return;
+
+    if (!game.drawOfferedBy || game.drawOfferedBy === userId) {
+      socket.emit("game:error", { message: "No draw offer to accept." });
+      return;
+    }
 
     await finalizeGame({ ...game, result: "draw", terminatedBy: "draw-agreement" }, io);
   });
 
-  socket.on("game:draw-decline", async (payload: { gameId: string }) => {
+  socket.on("game:draw-decline", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
     if (!game || !isPlayer(game, userId)) return;
 
+    const updated = { ...game, drawOfferedBy: undefined };
+    await saveGameToRedis(updated);
     socket.to(room(game.gameId)).emit("game:draw-declined", { gameId: game.gameId, declinedBy: userId });
   });
 
-  socket.on("game:abort", async (payload: { gameId: string }) => {
+  socket.on("game:abort", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const payload = parsed.data;
     const game = await getGameFromRedis(payload.gameId);
     const userId = socket.data.userId as string;
     if (!game || !isPlayer(game, userId)) return;

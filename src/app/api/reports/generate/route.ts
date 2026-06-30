@@ -7,6 +7,7 @@ import { Resend } from "resend";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateGameReportNarrative, type GameReportStats } from "@/lib/claude";
+import { reportGenerateSchema } from "@/lib/validations/phase2";
 
 export const runtime = "nodejs";
 
@@ -227,7 +228,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const payload = verifyAccessToken(token);
-    const body = (await request.json()) as { lichessId?: string; chesscomId?: string };
+    const rawBody = await request.json();
+    const parsed = reportGenerateSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, message: parsed.error.issues[0].message }, { status: 400 });
+    }
+    const body = parsed.data;
     const user = await db.user.findUnique({
       where: { id: payload.userId },
       select: { id: true, username: true, email: true },

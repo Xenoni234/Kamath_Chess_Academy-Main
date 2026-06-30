@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { verifyAccessToken } from "@/lib/auth";
 
 type LichessPuzzleResponse = {
   game?: { id?: string };
@@ -19,7 +20,17 @@ function mapLichessPuzzle(data: LichessPuzzleResponse) {
   };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const token = request.cookies.get("kca_access_token")?.value;
+  if (!token) {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+  try {
+    verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
   const count = await db.puzzle.count();
 
   if (count > 0) {
