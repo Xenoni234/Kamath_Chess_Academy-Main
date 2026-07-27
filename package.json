@@ -8,7 +8,8 @@
     "start": "NODE_ENV=production node server.mjs",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "import:puzzles": "npx tsx scripts/importPuzzles.ts"
+    "import:puzzles": "npx tsx --env-file=.env.local scripts/importPuzzles.ts",
+    "reset:data": "npx tsx --env-file=.env.local scripts/resetTestData.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
