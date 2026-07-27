@@ -112,7 +112,7 @@ export default function RegisterPage() {
             <TextField label="Username" value={form.username} onChange={(value) => update("username", value)} required error={fieldErrors.username?.[0]} />
             <TextField label="Email" type="email" value={form.email} onChange={(value) => update("email", value)} required error={fieldErrors.email?.[0]} />
             <TextField label="Mobile" value={form.mobile} onChange={(value) => update("mobile", value)} required error={fieldErrors.mobile?.[0]} />
-            <TextField label="Password" type="password" value={form.password} onChange={(value) => update("password", value)} required hint="Minimum 8 characters" error={fieldErrors.password?.[0]} />
+            <TextField label="Password" type="password" value={form.password} onChange={(value) => update("password", value)} required hint="At least 8 characters" error={fieldErrors.password?.[0]} />
             <TextField label="Confirm Password" type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} required error={fieldErrors.confirmPassword?.[0]} />
           </>
         )}
