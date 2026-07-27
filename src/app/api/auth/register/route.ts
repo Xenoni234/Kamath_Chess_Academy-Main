@@ -8,7 +8,6 @@ import { registerSchema } from "@/lib/validations";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    console.log('=== REGISTER BODY RECEIVED ===', JSON.stringify(body, null, 2));
 
     const result = registerSchema.safeParse(body);
 
@@ -65,34 +64,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, user }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const errMsg = error.message.toLowerCase();
-      const metaStr = JSON.stringify(error.meta || "").toLowerCase();
-      
-      if (errMsg.includes("email") || metaStr.includes("email")) {
-        return NextResponse.json(
-          { success: false, message: "An account with this email already exists." },
-          { status: 409 }
-        );
-      }
-      if (errMsg.includes("username") || metaStr.includes("username")) {
-        return NextResponse.json(
-          { success: false, message: "This username is already taken." },
-          { status: 409 }
-        );
-      }
-      if (errMsg.includes("mobile") || metaStr.includes("mobile")) {
-        return NextResponse.json(
-          { success: false, message: "This mobile number is already registered." },
-          { status: 409 }
-        );
-      }
+      const haystack = (error.message + JSON.stringify(error.meta ?? "")).toLowerCase();
+
+      // Map the conflicting column onto a per-field message so the register
+      // page renders it under the offending input, not just as a banner.
+      const conflict: { field: string; message: string } = haystack.includes("email")
+        ? { field: "email", message: "An account with this email already exists." }
+        : haystack.includes("username")
+          ? { field: "username", message: "This username is already taken." }
+          : haystack.includes("mobile")
+            ? { field: "mobile", message: "This mobile number is already registered." }
+            : { field: "form", message: "An account with those details already exists." };
+
       return NextResponse.json(
-        { success: false, message: "An account with those details already exists." },
+        { success: false, message: conflict.message, errors: { [conflict.field]: [conflict.message] } },
         { status: 409 }
       );
     }
 
+    // Log the real error server-side only; never leak Prisma internals or a
+    // stack trace to the client.
     console.error("Registration failed:", error);
-    return NextResponse.json({ success: false, message: "Registration failed.", error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }, { status: 500 });
+    return NextResponse.json({ success: false, message: "Registration failed. Please try again." }, { status: 500 });
   }
 }
