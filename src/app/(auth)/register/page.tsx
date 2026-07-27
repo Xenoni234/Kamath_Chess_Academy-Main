@@ -45,6 +45,7 @@ export default function RegisterPage() {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormState>(initialForm);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const requiredConsentsReady = useMemo(
@@ -65,9 +66,8 @@ export default function RegisterPage() {
     }
 
     setError("");
+    setFieldErrors({});
     setIsSubmitting(true);
-
-    console.log("Register payload sent from frontend:", form);
 
     try {
       const response = await fetch("/api/auth/register", {
@@ -78,12 +78,20 @@ export default function RegisterPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message ?? "Registration failed.");
+        const errors: Record<string, string[]> = data.errors ?? {};
+        setFieldErrors(errors);
+        // Field-level validation errors live on step 1 (account details); jump back so they are visible.
+        const step1Fields = ["username", "email", "mobile", "password", "confirmPassword"];
+        if (step1Fields.some((field) => errors[field]?.length)) {
+          setStep(1);
+        }
+        setError(data.message ?? "Registration failed.");
+        return;
       }
 
       router.push("/login");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Registration failed.");
+    } catch {
+      setError("Registration failed. Please check your connection and try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -101,11 +109,11 @@ export default function RegisterPage() {
 
         {step === 1 && (
           <>
-            <TextField label="Username" value={form.username} onChange={(value) => update("username", value)} required />
-            <TextField label="Email" type="email" value={form.email} onChange={(value) => update("email", value)} required />
-            <TextField label="Mobile" value={form.mobile} onChange={(value) => update("mobile", value)} required />
-            <TextField label="Password" type="password" value={form.password} onChange={(value) => update("password", value)} required />
-            <TextField label="Confirm Password" type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} required />
+            <TextField label="Username" value={form.username} onChange={(value) => update("username", value)} required error={fieldErrors.username?.[0]} />
+            <TextField label="Email" type="email" value={form.email} onChange={(value) => update("email", value)} required error={fieldErrors.email?.[0]} />
+            <TextField label="Mobile" value={form.mobile} onChange={(value) => update("mobile", value)} required error={fieldErrors.mobile?.[0]} />
+            <TextField label="Password" type="password" value={form.password} onChange={(value) => update("password", value)} required hint="Minimum 8 characters" error={fieldErrors.password?.[0]} />
+            <TextField label="Confirm Password" type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} required error={fieldErrors.confirmPassword?.[0]} />
           </>
         )}
 
@@ -181,6 +189,8 @@ function TextField({
   required = false,
   inputMode,
   maxLength,
+  hint,
+  error,
 }: {
   label: string;
   value: string;
@@ -189,15 +199,38 @@ function TextField({
   required?: boolean;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   maxLength?: number;
+  hint?: string;
+  error?: string;
 }) {
   const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
 
   return (
     <div>
       <label htmlFor={id} className="mb-2 block font-display text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
         {label}
       </label>
-      <input id={id} className="input-field" type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} inputMode={inputMode} maxLength={maxLength} />
+      <input
+        id={id}
+        className={`input-field ${error ? "border-kca-danger" : ""}`}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        inputMode={inputMode}
+        maxLength={maxLength}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+      />
+      {error ? (
+        <p id={`${id}-error`} className="mt-1.5 text-xs text-kca-danger">
+          {error}
+        </p>
+      ) : hint ? (
+        <p id={`${id}-hint`} className="mt-1.5 text-xs text-kca-gray-400">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }
