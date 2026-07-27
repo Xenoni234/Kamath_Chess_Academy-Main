@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Menu, X } from "lucide-react";
+import ThemeToggle from "@/components/ThemeToggle";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -50,20 +51,24 @@ export default function Navbar() {
         </nav>
 
         {/* Desktop CTA */}
-        <div className="hidden md:block">
+        <div className="hidden items-center gap-3 md:flex">
+          <ThemeToggle variant="icon" />
           <Link href="/login" className="block rounded-lg border border-kca-cyan bg-transparent px-5 py-2 font-display text-sm font-semibold text-kca-cyan transition-all duration-300 hover:bg-kca-cyan/10 hover:shadow-[0_0_15px_rgba(0,200,232,0.2)]">
             Login
           </Link>
         </div>
 
-        {/* Mobile Hamburger Button */}
-        <button
-          onClick={toggleMenu}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-kca-border text-kca-white transition-colors hover:border-kca-cyan hover:text-kca-cyan md:hidden"
-          aria-label="Toggle navigation menu"
-        >
-          {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-        </button>
+        {/* Mobile controls */}
+        <div className="flex items-center gap-2 md:hidden">
+          <ThemeToggle variant="icon" />
+          <button
+            onClick={toggleMenu}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-kca-border text-kca-white transition-colors hover:border-kca-cyan hover:text-kca-cyan"
+            aria-label="Toggle navigation menu"
+          >
+            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile Slide-in Menu Overlay */}

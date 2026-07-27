@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { BookOpen, Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
+import ThemeToggle from "@/components/ThemeToggle";
 
 type NavItem = {
   href: string;
@@ -50,7 +51,7 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: "/dashboard/puzzles", label: "Puzzles", icon: Puzzle },
     { href: "/dashboard/openings", label: "Openings", icon: Map },
     { href: "/dashboard/reports", label: "Reports", icon: FileText },
-    { href: `/dashboard/${roleLower}`, label: "Games", icon: Trophy },
+    { href: "/dashboard/games", label: "Games", icon: Trophy },
   ];
 
   return (
@@ -100,10 +101,13 @@ export default function DashboardSidebar({ username, role }: { username: string;
         })}
       </nav>
 
-      <button type="button" onClick={logout} className="btn-secondary mt-auto w-full">
-        <LogOut className="h-5 w-5" />
-        Logout
-      </button>
+      <div className="mt-auto space-y-2 pt-4">
+        <ThemeToggle />
+        <button type="button" onClick={logout} className="btn-secondary w-full">
+          <LogOut className="h-5 w-5" />
+          Logout
+        </button>
+      </div>
     </aside>
   );
 }
