@@ -9,23 +9,26 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Values are driven by CSS variables (see globals.css) so the palette
+        // can switch between dark (default) and light themes at runtime. Opacity
+        // modifiers (e.g. bg-kca-cyan/25) work because Tailwind v4 uses color-mix.
         kca: {
-          black: "#050505",
-          surface: "#0D0D0D",
-          "surface-2": "#141414",
-          "surface-3": "#1C1C1C",
-          border: "#1F1F1F",
-          "border-bright": "#2D2D2D",
-          cyan: "#00C8E8",
-          "cyan-bright": "#29D8ED",
-          "cyan-dim": "#0099B2",
-          white: "#FFFFFF",
-          "gray-100": "#E0E0E0",
-          "gray-400": "#888888",
-          "gray-600": "#444444",
-          success: "#22C55E",
-          warning: "#F59E0B",
-          danger: "#EF4444",
+          black: "var(--kca-black)",
+          surface: "var(--kca-surface)",
+          "surface-2": "var(--kca-surface-2)",
+          "surface-3": "var(--kca-surface-3)",
+          border: "var(--kca-border)",
+          "border-bright": "var(--kca-border-bright)",
+          cyan: "var(--kca-cyan)",
+          "cyan-bright": "var(--kca-cyan-bright)",
+          "cyan-dim": "var(--kca-cyan-dim)",
+          white: "var(--kca-white)",
+          "gray-100": "var(--kca-gray-100)",
+          "gray-400": "var(--kca-gray-400)",
+          "gray-600": "var(--kca-gray-600)",
+          success: "var(--kca-success)",
+          warning: "var(--kca-warning)",
+          danger: "var(--kca-danger)",
         },
       },
       fontFamily: {

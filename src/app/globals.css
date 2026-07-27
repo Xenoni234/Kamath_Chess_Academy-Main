@@ -2,13 +2,57 @@
 
 @config "../../tailwind.config.ts";
 
+/* Theme tokens — dark is the default; [data-theme="light"] overrides them.
+   The kca-* Tailwind colors resolve to these variables (see tailwind.config.ts). */
+:root {
+  --kca-black: #050505;
+  --kca-surface: #0D0D0D;
+  --kca-surface-2: #141414;
+  --kca-surface-3: #1C1C1C;
+  --kca-border: #1F1F1F;
+  --kca-border-bright: #2D2D2D;
+  --kca-cyan: #00C8E8;
+  --kca-cyan-bright: #29D8ED;
+  --kca-cyan-dim: #0099B2;
+  --kca-white: #FFFFFF;
+  --kca-gray-100: #E0E0E0;
+  --kca-gray-400: #888888;
+  --kca-gray-600: #444444;
+  --kca-success: #22C55E;
+  --kca-warning: #F59E0B;
+  --kca-danger: #EF4444;
+}
+
+:root[data-theme="light"] {
+  --kca-black: #F2F3F5;      /* page background */
+  --kca-surface: #FFFFFF;    /* cards / surfaces */
+  --kca-surface-2: #EBECEF;  /* elevated / hover */
+  --kca-surface-3: #FFFFFF;  /* raised inputs */
+  --kca-border: #E1E3E8;
+  --kca-border-bright: #C9CDD4;
+  --kca-cyan: #0891B2;       /* darkened for contrast on light surfaces */
+  --kca-cyan-bright: #06B6D4;
+  --kca-cyan-dim: #0E7490;
+  --kca-white: #0B0D10;      /* primary text (highest contrast) */
+  --kca-gray-100: #33383F;   /* secondary text */
+  --kca-gray-400: #5B616B;   /* muted text */
+  --kca-gray-600: #9BA1AB;   /* faint text / placeholders */
+  --kca-success: #15A34A;
+  --kca-warning: #B45309;
+  --kca-danger: #DC2626;
+}
+
 /* Base Body Styles */
+html {
+  background-color: var(--kca-black);
+}
 body {
-  background-color: #050505;
-  color: #FFFFFF;
+  background-color: var(--kca-black);
+  color: var(--kca-white);
   font-family: var(--font-inter), sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Headings Styling */
@@ -30,14 +74,14 @@ h1, h2, h3, h4, h5, h6 {
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #0D0D0D;
+  background: var(--kca-surface);
 }
 ::-webkit-scrollbar-thumb {
-  background: #2D2D2D;
+  background: var(--kca-border-bright);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #00C8E8;
+  background: var(--kca-cyan);
 }
 
 /* Reusable Component Classes */
