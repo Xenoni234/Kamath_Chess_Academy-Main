@@ -74,23 +74,27 @@ export default function ChessBoard({
     const pieceColor = piece.pieceType[0];
     const pieceType = piece.pieceType[1].toLowerCase();
 
+    // Only accept the drop if it is a legal move from this square. Illegal
+    // drops snap back cleanly instead of throwing inside chess.js (which would
+    // surface as a dev-overlay console error).
+    let legalMoves;
+    try {
+      legalMoves = game.moves({ square: sourceSquare as Square, verbose: true });
+    } catch {
+      return false;
+    }
+    if (!legalMoves.some((m) => m.to === targetSquare)) {
+      return false;
+    }
+
     const isPawn = pieceType === "p";
     const isPromotionRank =
       (pieceColor === "w" && targetSquare[1] === "8") ||
       (pieceColor === "b" && targetSquare[1] === "1");
 
     if (isPawn && isPromotionRank) {
-      // Validate that there is a legal move from source to target
-      try {
-        const moves = game.moves({ square: sourceSquare as Square, verbose: true });
-        const isLegal = moves.some((m) => m.to === targetSquare);
-        if (isLegal) {
-          setPendingPromotion({ from: sourceSquare, to: targetSquare });
-          return false; // prevent react-chessboard from dropping instantly without promo selection
-        }
-      } catch (e) {
-        console.error(e);
-      }
+      setPendingPromotion({ from: sourceSquare, to: targetSquare });
+      return false; // wait for promotion-piece selection before committing
     }
 
     onMove(sourceSquare, targetSquare);

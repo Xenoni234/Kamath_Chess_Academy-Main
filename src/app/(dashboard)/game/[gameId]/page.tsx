@@ -25,6 +25,7 @@ export default async function GameRoomPage(context: { params: Promise<{ gameId: 
 
   const userId = payload.userId;
   const username = payload.username;
+  const role = payload.role;
 
   // 1. Fetch game from Redis first
   let activeGame = await getGameFromRedis(gameId);
@@ -88,6 +89,7 @@ export default async function GameRoomPage(context: { params: Promise<{ gameId: 
       gameId={gameId}
       userId={userId}
       username={username}
+      role={role}
       activeGame={activeGame}
       dbGame={dbGame as unknown as GameState}
       isFinished={isFinished}

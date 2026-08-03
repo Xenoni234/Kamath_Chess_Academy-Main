@@ -147,6 +147,40 @@ export function setupGameHandlers(io: Server, socket: Socket) {
     io.to(room(game.gameId)).emit("game:update", nextGame);
   });
 
+  socket.on("game:timeout", async (rawPayload: unknown) => {
+    const parsed = gameIdSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const payload = parsed.data;
+    const game = await getGameFromRedis(payload.gameId);
+    const userId = socket.data.userId as string;
+
+    if (!game || game.status !== "ongoing" || !isPlayer(game, userId)) return;
+
+    // Server-authoritative flag check: recompute the on-move player's real
+    // remaining time from lastMoveAt. Only end the game if it is truly <= 0,
+    // so a client cannot force a timeout that has not actually happened.
+    const onMove = expectedMover(game);
+    const stored = onMove === game.white ? game.whiteTimeMs : game.blackTimeMs;
+    const remaining = stored - Math.max(0, Date.now() - game.lastMoveAt);
+
+    if (remaining > 0) return;
+
+    const timedOutClocks =
+      onMove === game.white
+        ? { whiteTimeMs: 0, blackTimeMs: game.blackTimeMs }
+        : { whiteTimeMs: game.whiteTimeMs, blackTimeMs: 0 };
+
+    await finalizeGame(
+      {
+        ...game,
+        ...timedOutClocks,
+        result: resultForWinner(game, opponent(game, onMove)),
+        terminatedBy: "timeout",
+      },
+      io,
+    );
+  });
+
   socket.on("game:resign", async (rawPayload: unknown) => {
     const parsed = gameIdSchema.safeParse(rawPayload);
     if (!parsed.success) return;
