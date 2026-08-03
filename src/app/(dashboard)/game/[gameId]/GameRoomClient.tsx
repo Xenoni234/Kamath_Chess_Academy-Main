@@ -22,6 +22,7 @@ type GameRoomClientProps = {
   gameId: string;
   userId: string;
   username: string;
+  role: string;
   activeGame: GameState | null; // Initially loaded active game state (or null)
   dbGame: GameState | null; // Initially loaded finished game state (or null)
   isFinished: boolean;
@@ -35,12 +36,14 @@ export default function GameRoomClient({
   gameId,
   userId,
   username,
+  role,
   activeGame: initialActiveGame,
   dbGame: initialDbGame,
   isFinished: initialIsFinished,
   initialPlayers,
 }: GameRoomClientProps) {
   const router = useRouter();
+  const dashboardHref = `/dashboard/${role.toLowerCase()}`;
 
   // Game state
   const [game, setGame] = useState<GameState>(initialActiveGame || initialDbGame!);
@@ -220,7 +223,9 @@ export default function GameRoomClient({
         socket.emit("game:move", { gameId, from, to, promotion });
       }
     } catch (e) {
-      console.error("Illegal move locally", e);
+      // Should not happen now that ChessBoard pre-validates, but never throw a
+      // dev-overlay error for a mere illegal move — just ignore it.
+      console.warn("Ignored illegal move", e);
     }
   };
 
@@ -237,6 +242,14 @@ export default function GameRoomClient({
   const handleAbort = () => {
     const socket = getSocket();
     socket.emit("game:abort", { gameId });
+  };
+
+  // Fired when a clock hits zero. The server re-validates the real remaining
+  // time before ending the game, so this is safe to emit from either client.
+  const handleTimeout = () => {
+    if (!isOngoing) return;
+    const socket = getSocket();
+    socket.emit("game:timeout", { gameId });
   };
 
   const handleAcceptDraw = () => {
@@ -282,13 +295,20 @@ export default function GameRoomClient({
     <div className="flex flex-col min-h-screen bg-kca-black text-kca-white">
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b border-kca-border bg-kca-surface">
-        <Link href="/dashboard" className="flex items-center gap-3">
+        <Link href={dashboardHref} className="flex items-center gap-3">
           <Image src="/kca-logo.png" alt="KCA" width={36} height={36} className="h-9 w-9 object-contain" />
           <span className="font-display font-bold text-lg text-kca-white">Kamath Chess Academy</span>
         </Link>
-        {isSpectator && (
+        {isSpectator ? (
           <span className="bg-kca-cyan/20 border border-kca-cyan/50 text-kca-cyan px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider animate-pulse">
             Spectating
+          </span>
+        ) : (
+          <span className="flex items-center gap-2 bg-kca-surface-2 border border-kca-border px-3.5 py-1.5 rounded-full text-xs font-semibold text-kca-gray-100">
+            <span className="text-kca-gray-400 uppercase tracking-wider">Playing as</span>
+            <span className="text-kca-white">{username}</span>
+            <span className={cn("h-2.5 w-2.5 rounded-full border", orientation === "white" ? "bg-white border-kca-border-bright" : "bg-black border-kca-gray-400")} />
+            <span className="text-kca-cyan uppercase tracking-wider">{orientation}</span>
           </span>
         )}
       </header>
@@ -311,6 +331,7 @@ export default function GameRoomClient({
             <GameClock
               timeMs={orientation === "white" ? blackTime : whiteTime}
               isActive={orientation === "white" ? blackClockActive : whiteClockActive}
+              onExpire={handleTimeout}
             />
           </div>
 
@@ -344,6 +365,7 @@ export default function GameRoomClient({
             <GameClock
               timeMs={orientation === "white" ? whiteTime : blackTime}
               isActive={orientation === "white" ? whiteClockActive : blackClockActive}
+              onExpire={handleTimeout}
             />
           </div>
         </div>
@@ -457,6 +479,12 @@ export default function GameRoomClient({
               >
                 Analysis (Coming Soon)
               </button>
+              <Link
+                href={dashboardHref}
+                className="w-full py-2.5 text-center text-sm font-semibold text-kca-gray-400 hover:text-kca-white transition-colors"
+              >
+                Exit to Dashboard
+              </Link>
             </div>
           </div>
         </div>

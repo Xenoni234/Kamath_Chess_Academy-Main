@@ -7,16 +7,30 @@ type GameClockProps = {
   timeMs: number;
   isActive: boolean;
   format?: string;
+  onExpire?: () => void;
 };
 
-export default function GameClock({ timeMs, isActive, format }: GameClockProps) {
+export default function GameClock({ timeMs, isActive, format, onExpire }: GameClockProps) {
   const [localTime, setLocalTime] = useState(timeMs);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const expiredRef = useRef(false);
 
   // Sync internal state when server updates timeMs
   useEffect(() => {
     setLocalTime(timeMs);
   }, [timeMs]);
+
+  // Fire once when this clock runs out while active. The server re-validates
+  // the real remaining time before ending the game, so this is only a trigger.
+  useEffect(() => {
+    if (isActive && localTime <= 0 && !expiredRef.current) {
+      expiredRef.current = true;
+      onExpire?.();
+    }
+    if (localTime > 0) {
+      expiredRef.current = false;
+    }
+  }, [isActive, localTime, onExpire]);
 
   // Handle countdown interval
   useEffect(() => {
