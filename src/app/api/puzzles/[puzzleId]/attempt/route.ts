@@ -59,10 +59,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
     }
 
     return NextResponse.json({
-      solved: body.solved,
+      success: true,
+      solved,
       nextReviewAt,
-      ratingBefore: puzzle.rating,
-      ratingAfter: puzzle.rating,
+      repetition: data.repetition,
+      intervalDays,
     });
   } catch {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });

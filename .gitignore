@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# puzzle data dumps (large Lichess CSVs — imported into the DB, never committed)
+*.csv
+*.csv.zst
+*.zst

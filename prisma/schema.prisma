@@ -278,6 +278,7 @@ model Puzzle {
   attempts    PuzzleAttempt[]
 
   @@index([rating])
+  @@index([themes], type: Gin)
 }
 
 model PuzzleAttempt {

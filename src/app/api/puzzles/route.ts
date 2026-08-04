@@ -45,16 +45,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, puzzles: dueAttempts.map((attempt) => attempt.puzzle) });
     }
 
-    const puzzles = await db.puzzle.findMany({
-      where: {
-        rating: { gte: minRating, lte: maxRating },
-        themes: theme ? { has: theme } : undefined,
-      },
-      take: limit,
-      orderBy: { createdAt: "desc" },
+    // No reviews due — serve a fresh puzzle. Prefer ones the user has never
+    // attempted, picked at random so "next puzzle" doesn't repeat.
+    const attempted = await db.puzzleAttempt.findMany({
+      where: { userId: payload.userId },
+      select: { puzzleId: true },
     });
+    const attemptedIds = attempted.map((a) => a.puzzleId);
+    const themeFilter = theme ? { has: theme } : undefined;
 
-    if (puzzles.length > 0) {
+    const pickRandom = async (excludeAttempted: boolean) => {
+      const where = {
+        rating: { gte: minRating, lte: maxRating },
+        themes: themeFilter,
+        id: excludeAttempted && attemptedIds.length ? { notIn: attemptedIds } : undefined,
+      };
+      const total = await db.puzzle.count({ where });
+      if (total === 0) return null;
+      const skip = Math.floor(Math.random() * Math.max(1, total - limit + 1));
+      return db.puzzle.findMany({ where, take: limit, skip });
+    };
+
+    const puzzles = (await pickRandom(true)) ?? (await pickRandom(false));
+
+    if (puzzles && puzzles.length > 0) {
       return NextResponse.json({ success: true, puzzles });
     }
 
