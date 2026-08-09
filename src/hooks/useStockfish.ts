@@ -1,120 +1,358 @@
 "use client";
-import { useEffect, useRef, useCallback, useState } from "react";
 
-export type StockfishResult = {
-  bestMove: string;
-  evaluation: number;    // centipawns, positive = white better
-  depth: number;
-  mate?: number;
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  parseBestMove,
+  parseInfoLine,
+  setOption,
+  type EngineLine,
+} from "@/lib/engine/uci";
+import { defaultThreads, selectEngine, type EngineFlavor } from "@/lib/engine/select";
+
+export type AnalyzeRequest = {
+  fen: string;
+  /** Search to a fixed depth. Ignored when `movetimeMs` is set. */
+  depth?: number;
+  /** Search for a fixed wall-clock time instead of a depth. */
+  movetimeMs?: number;
+  multipv?: number;
 };
 
-export function useStockfish() {
+export type AnalyzeResult = {
+  fen: string;
+  bestMove: string;
+  lines: EngineLine[];
+  depth: number;
+};
+
+export type StrengthOptions = {
+  /** 0-20. Lower makes the engine deliberately choose weaker moves. */
+  skillLevel?: number;
+  /** Approximate target rating. Null disables UCI_LimitStrength. */
+  elo?: number | null;
+};
+
+export type UseStockfishOptions = StrengthOptions & {
+  multipv?: number;
+  hashMb?: number;
+  /** Skip creating the worker — useful while a page is still deciding. */
+  enabled?: boolean;
+};
+
+type Task = {
+  fen: string;
+  go: string;
+  multipv: number;
+  /**
+   * "infinite" backs the board's live evaluation and is abandoned freely;
+   * "search" is a bounded request someone is awaiting. Keeping them apart lets
+   * `stopInfinite()` tear down the live search without killing a scan.
+   */
+  kind: "infinite" | "search";
+  settle: (result: AnalyzeResult) => void;
+};
+
+const LINE_UPDATE_INTERVAL_MS = 120;
+
+function emptyResult(fen: string): AnalyzeResult {
+  return { fen, bestMove: "", lines: [], depth: 0 };
+}
+
+/**
+ * Drives a Stockfish web worker.
+ *
+ * The engine handles one search at a time, so requests go through an explicit
+ * queue. Submitting while a search is running stops it, and pending requests
+ * can be cancelled — both matter because the analysis board restarts its
+ * evaluation on every board navigation.
+ */
+export function useStockfish(options: UseStockfishOptions = {}) {
+  const {
+    multipv: defaultMultipv = 1,
+    hashMb = 64,
+    skillLevel,
+    elo = null,
+    enabled = true,
+  } = options;
+
   const workerRef = useRef<Worker | null>(null);
-  const resolverRef = useRef<((r: StockfishResult) => void) | null>(null);
-  const resultRef = useRef<Partial<StockfishResult>>({});
   const readyRef = useRef(false);
-  const fenRef = useRef<string>("");
-  
+  const disposedRef = useRef(false);
+
+  const currentRef = useRef<Task | null>(null);
+  const queueRef = useRef<Task[]>([]);
+  const linesRef = useRef<Map<number, EngineLine>>(new Map());
+  const appliedMultipvRef = useRef(0);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [isReady, setIsReady] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [currentEval, setCurrentEval] = useState<Partial<StockfishResult>>({});
+  const [lines, setLines] = useState<EngineLine[]>([]);
+  const [engine] = useState(() => (typeof window === "undefined" ? null : selectEngine()));
+
+  const post = useCallback((command: string) => {
+    workerRef.current?.postMessage(command);
+  }, []);
+
+  const sortedLines = useCallback(
+    () => [...linesRef.current.values()].sort((a, b) => a.multipv - b.multipv),
+    [],
+  );
+
+  // A deep search emits info lines faster than React should re-render.
+  const flushLines = useCallback(() => {
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      if (!disposedRef.current) setLines(sortedLines());
+    }, LINE_UPDATE_INTERVAL_MS);
+  }, [sortedLines]);
+
+  const startTask = useCallback(
+    (task: Task) => {
+      linesRef.current = new Map();
+      currentRef.current = task;
+      setLines([]);
+      setIsAnalyzing(true);
+
+      if (appliedMultipvRef.current !== task.multipv) {
+        appliedMultipvRef.current = task.multipv;
+        post(setOption("MultiPV", task.multipv));
+      }
+
+      post(`position fen ${task.fen}`);
+      post(task.go);
+    },
+    [post],
+  );
+
+  /** Start the next queued search if the engine is idle. */
+  const pump = useCallback(() => {
+    if (currentRef.current || disposedRef.current || !readyRef.current) return;
+    const next = queueRef.current.shift();
+    if (next) startTask(next);
+  }, [startTask]);
+
+  /**
+   * Drop queued searches, settling their callers with an empty result.
+   * Pass a kind to drop only that kind.
+   */
+  const cancelQueued = useCallback((kind?: Task["kind"]) => {
+    const queued = queueRef.current;
+    queueRef.current = kind ? queued.filter((task) => task.kind !== kind) : [];
+    const dropped = kind ? queued.filter((task) => task.kind === kind) : queued;
+    for (const task of dropped) task.settle(emptyResult(task.fen));
+  }, []);
+
+  const submit = useCallback(
+    (task: Task) => {
+      queueRef.current.push(task);
+      if (currentRef.current) {
+        // Cut the running search short; its `bestmove` will pump the queue.
+        post("stop");
+      } else {
+        pump();
+      }
+    },
+    [post, pump],
+  );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    
-    const worker = new Worker("/stockfish.js");
+    if (!enabled || typeof window === "undefined" || !engine) return;
+
+    disposedRef.current = false;
+    let worker: Worker;
+    try {
+      worker = new Worker(engine.url);
+    } catch (error) {
+      console.error("[stockfish] failed to start worker:", error);
+      return;
+    }
     workerRef.current = worker;
 
-    worker.onmessage = (e) => {
-      const line = typeof e.data === "string" ? e.data : "";
-      
+    worker.onerror = (event) => {
+      console.error("[stockfish] worker error:", event.message);
+    };
+
+    worker.onmessage = (event: MessageEvent) => {
+      const line = typeof event.data === "string" ? event.data : "";
+      if (!line) return;
+
       if (line === "uciok") {
+        if (engine.supportsThreads) {
+          worker.postMessage(setOption("Threads", defaultThreads()));
+        }
+        worker.postMessage(setOption("Hash", hashMb));
+        worker.postMessage("isready");
+        return;
+      }
+
+      if (line === "readyok") {
+        if (disposedRef.current) return;
         readyRef.current = true;
         setIsReady(true);
+        pump();
+        return;
       }
 
-      // Parse evaluation
-      if (line.startsWith("info depth") && !line.includes("currmove")) {
-        const depthMatch = line.match(/depth (\d+)/);
-        if (depthMatch) {
-          resultRef.current.depth = parseInt(depthMatch[1], 10);
-        }
+      const task = currentRef.current;
+      if (!task) return;
 
-        const isBlackToMove = fenRef.current.includes(" b ");
-        const multiplier = isBlackToMove ? -1 : 1;
-
-        const cpMatch = line.match(/score cp (-?\d+)/);
-        if (cpMatch) {
-          resultRef.current.evaluation = parseInt(cpMatch[1], 10) * multiplier;
-          delete resultRef.current.mate;
+      const info = parseInfoLine(line, task.fen);
+      if (info) {
+        // Keep the deepest snapshot per MultiPV slot so the eval bar does not
+        // jitter on shallow re-searches.
+        const existing = linesRef.current.get(info.multipv);
+        if (!existing || info.depth >= existing.depth) {
+          linesRef.current.set(info.multipv, info);
+          flushLines();
         }
-
-        const mateMatch = line.match(/score mate (-?\d+)/);
-        if (mateMatch) {
-          resultRef.current.mate = parseInt(mateMatch[1], 10) * multiplier;
-          delete resultRef.current.evaluation;
-        }
-        
-        setCurrentEval({ ...resultRef.current });
+        return;
       }
 
-      // Parse bestmove
-      if (line.startsWith("bestmove")) {
-        const moveMatch = line.match(/bestmove\s+(\S+)/);
-        if (moveMatch) {
-          resultRef.current.bestMove = moveMatch[1];
-          if (resolverRef.current) {
-            resolverRef.current(resultRef.current as StockfishResult);
-            resolverRef.current = null;
-          }
+      const best = parseBestMove(line);
+      if (best) {
+        const collected = sortedLines();
+        currentRef.current = null;
+
+        if (!disposedRef.current) {
+          setLines(collected);
           setIsAnalyzing(false);
         }
+
+        task.settle({
+          fen: task.fen,
+          bestMove: best.bestMove,
+          lines: collected,
+          depth: collected[0]?.depth ?? 0,
+        });
+
+        pump();
       }
     };
 
     worker.postMessage("uci");
 
     return () => {
-      worker.terminate();
-    };
-  }, []);
-
-  const findBestMove = useCallback((fen: string, depth: number = 15): Promise<StockfishResult> => {
-    return new Promise((resolve) => {
-      if (!workerRef.current || !readyRef.current) {
-        resolve({ bestMove: "", evaluation: 0, depth: 0 });
-        return;
+      disposedRef.current = true;
+      readyRef.current = false;
+      setIsReady(false);
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
-      
-      setIsAnalyzing(true);
-      resultRef.current = {};
-      setCurrentEval({});
-      resolverRef.current = resolve;
-      fenRef.current = fen;
-      
-      workerRef.current.postMessage(`position fen ${fen}`);
-      workerRef.current.postMessage(`go depth ${depth}`);
-    });
-  }, []);
-  
-  const startInfiniteAnalysis = useCallback((fen: string) => {
-    if (!workerRef.current || !readyRef.current) return;
-    
-    setIsAnalyzing(true);
-    resultRef.current = {};
-    setCurrentEval({});
-    fenRef.current = fen;
-    
-    workerRef.current.postMessage(`position fen ${fen}`);
-    workerRef.current.postMessage(`go infinite`);
-  }, []);
-  
-  const stopAnalysis = useCallback(() => {
-    if (workerRef.current && isAnalyzing) {
-      workerRef.current.postMessage("stop");
-      setIsAnalyzing(false);
-    }
-  }, [isAnalyzing]);
+      // Settle everything still outstanding so no caller is left awaiting.
+      const pending = currentRef.current;
+      currentRef.current = null;
+      pending?.settle(emptyResult(pending.fen));
+      const queued = queueRef.current;
+      queueRef.current = [];
+      for (const queuedTask of queued) queuedTask.settle(emptyResult(queuedTask.fen));
 
-  return { findBestMove, startInfiniteAnalysis, stopAnalysis, currentEval, isReady, isAnalyzing };
+      worker.terminate();
+      workerRef.current = null;
+    };
+  }, [enabled, engine, hashMb, flushLines, sortedLines, pump]);
+
+  /** Applies strength options. Safe to call before the engine is ready. */
+  const setStrength = useCallback(
+    (strength: StrengthOptions) => {
+      if (strength.skillLevel !== undefined) {
+        post(setOption("Skill Level", Math.max(0, Math.min(20, strength.skillLevel))));
+      }
+      if (strength.elo === null) {
+        post(setOption("UCI_LimitStrength", false));
+      } else if (strength.elo !== undefined) {
+        post(setOption("UCI_LimitStrength", true));
+        post(setOption("UCI_Elo", Math.max(1320, Math.min(3190, strength.elo))));
+      }
+    },
+    [post],
+  );
+
+  useEffect(() => {
+    if (!isReady) return;
+    setStrength({ skillLevel, elo });
+  }, [isReady, skillLevel, elo, setStrength]);
+
+  /**
+   * Search a position, resolving when the engine reports `bestmove`.
+   * Awaiting these in a loop (as the full-game scan does) runs them in order.
+   */
+  const analyze = useCallback(
+    (request: AnalyzeRequest): Promise<AnalyzeResult> =>
+      new Promise<AnalyzeResult>((resolve) => {
+        if (disposedRef.current) {
+          resolve(emptyResult(request.fen));
+          return;
+        }
+
+        submit({
+          fen: request.fen,
+          go: request.movetimeMs
+            ? `go movetime ${request.movetimeMs}`
+            : `go depth ${request.depth ?? 16}`,
+          multipv: request.multipv ?? defaultMultipv,
+          kind: "search",
+          settle: resolve,
+        });
+      }),
+    [submit, defaultMultipv],
+  );
+
+  /** Halt the current search and discard anything queued behind it. */
+  const stop = useCallback(() => {
+    cancelQueued();
+    if (currentRef.current) post("stop");
+  }, [cancelQueued, post]);
+
+  /**
+   * Tear down the live evaluation only.
+   *
+   * The analysis board's effect cleanup runs *after* a full-game scan has
+   * already queued its first request, so an unconditional `stop()` there would
+   * cancel the scan's own work. This leaves bounded searches alone.
+   */
+  const stopInfinite = useCallback(() => {
+    cancelQueued("infinite");
+    if (currentRef.current?.kind === "infinite") post("stop");
+  }, [cancelQueued, post]);
+
+  /**
+   * Analyse a position indefinitely, streaming into `lines` until it is
+   * stopped or a later request supersedes it. Drives the live evaluation.
+   */
+  const startInfinite = useCallback(
+    (fen: string, multipv?: number) => {
+      cancelQueued("infinite");
+      submit({
+        fen,
+        go: "go infinite",
+        multipv: multipv ?? defaultMultipv,
+        kind: "infinite",
+        settle: () => undefined,
+      });
+    },
+    [cancelQueued, submit, defaultMultipv],
+  );
+
+  /** Clear the transposition table between unrelated positions. */
+  const newGame = useCallback(() => {
+    post("ucinewgame");
+    post("isready");
+  }, [post]);
+
+  return {
+    isReady,
+    isAnalyzing,
+    lines,
+    analyze,
+    startInfinite,
+    stop,
+    stopInfinite,
+    setStrength,
+    newGame,
+    flavor: (engine?.flavor ?? "wasm-st") as EngineFlavor,
+    engineLabel: engine?.label ?? "Stockfish",
+  };
 }

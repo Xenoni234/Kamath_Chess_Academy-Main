@@ -85,6 +85,84 @@ Register a first account, then re-register to trigger the duplicate cases.
       request body or password, and the 409 response body contains only
       `message` + `errors` (no stack trace).
 
+## 6. Engine foundation (cross-origin isolation)
+
+Prerequisite for everything in sections 7–10.
+
+- [ ] `npm run dev` prints `[copyEngine] … -> public/engine/` **and**
+      `> Socket.io server attached`.
+- [ ] DevTools console on any page: `crossOriginIsolated` is `true` and
+      `typeof SharedArrayBuffer` is `"function"`.
+- [ ] Network tab on `/dashboard/analysis` loads
+      `/engine/stockfish-18-lite.wasm` (~7 MB), **not** the old 1.5 MB
+      `/stockfish.js`.
+- [ ] **COEP regression check:** open a live game in two browsers, confirm
+      Socket.io still connects and moves sync both ways. This is the main risk
+      of the new headers.
+
+## 7. Analysis board (`/dashboard/analysis`)
+
+- [ ] From `/dashboard/games`, click **Analyse** on a finished game → the board
+      loads that game and the header names both players.
+- [ ] Arrow keys `←`/`→` step through moves; `Home`/`End` jump to the ends.
+- [ ] The eval bar moves and three engine lines update as you navigate; a cyan
+      arrow points at the engine's best move.
+- [ ] Paste a Lichess PGN in the Import panel → it loads. Paste garbage → a
+      friendly "not a valid PGN" error, no crash.
+- [ ] Paste a FEN → the position loads. Paste garbage → friendly error.
+- [ ] Play a move from the middle of a loaded game → the line branches from
+      there and stale classifications are cleared.
+- [ ] **Analyse game** on a ~40-move game: progress bar advances, completes,
+      and shows per-side accuracy plus blunder/mistake counts. **Cancel**
+      mid-scan stops it and the board stays usable.
+- [ ] Click a graded move → the verdict card names the classification and the
+      move the engine preferred.
+- [ ] **Explain move** streams text in token by token (not one blob).
+      Requires `ANTHROPIC_API_KEY`.
+- [ ] Click Explain 11 times inside a minute → the 11th shows the rate-limit
+      message rather than an error.
+
+## 8. Play vs engine (`/dashboard/play-engine`)
+
+- [ ] Level 1 is beatable; level 8 is not. (Confirms `Skill Level` / `UCI_Elo`
+      actually bind — if both feel identical, the options are not applying.)
+- [ ] Playing as Black: the engine opens immediately.
+- [ ] **Flip board** changes only the view — you still play your own colour.
+- [ ] Hint draws an amber arrow; Takeback undoes both your move and the
+      engine's reply; Resign ends the game.
+- [ ] Promote a pawn → the promotion dialog appears and the choice is applied.
+- [ ] On game over, **Analyse this game** opens the analysis board with the
+      finished game loaded.
+
+## 9. Opening explorer (`/dashboard/openings`)
+
+Requires `LICHESS_API_TOKEN` — the explorer API now requires OAuth.
+
+- [ ] Play `1.e4` → real Lichess move statistics and win-rate bars appear.
+- [ ] Clicking a row in the moves table plays that move and refetches.
+- [ ] The breadcrumb line lets you jump back to an earlier move.
+- [ ] Toggling a speed or rating filter refetches; deselecting the last one is
+      refused (at least one must stay on).
+- [ ] Revisit a position already seen → served instantly from cache. Check the
+      `opening_cache` row in `npx prisma studio`.
+- [ ] `curl` the route with `?fen=garbage` → **400**, not 502.
+- [ ] With `LICHESS_API_TOKEN` unset → "Opening explorer is not configured",
+      not a crash.
+
+## 10. Game reports (`/dashboard/reports`)
+
+- [ ] **New report** with a real Lichess username → the row appears and moves
+      `Queued → Analysing → Ready` on its own (the page polls every 3 s).
+- [ ] Accuracy is **not** in the old 75–90 random band. Cross-check one game
+      against Lichess's own accuracy figure — same formula, so it should land
+      within a few points.
+- [ ] **Download** returns a PDF containing accuracy by phase, most-played
+      openings and lowest-accuracy openings.
+- [ ] The report email arrives with the PDF attached.
+- [ ] A nonexistent username → status `Failed` with an explanatory message,
+      not a hang.
+- [ ] Downloading another user's report id → 404.
+
 ---
 
 ### Results / notes

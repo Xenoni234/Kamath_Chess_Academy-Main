@@ -473,12 +473,12 @@ export default function GameRoomClient({
               <Link href="/dashboard/play" className="btn-primary w-full py-3.5 font-bold">
                 New Game
               </Link>
-              <button
-                disabled
-                className="btn-secondary w-full py-3.5 font-bold border border-kca-cyan/20 text-kca-cyan/40 bg-transparent cursor-not-allowed"
+              <Link
+                href={`/dashboard/analysis?gameId=${gameId}`}
+                className="btn-secondary w-full py-3.5 font-bold text-center border border-kca-cyan/30 text-kca-cyan hover:bg-kca-cyan/10"
               >
-                Analysis (Coming Soon)
-              </button>
+                Analyse Game
+              </Link>
               <Link
                 href={dashboardHref}
                 className="w-full py-2.5 text-center text-sm font-semibold text-kca-gray-400 hover:text-kca-white transition-colors"

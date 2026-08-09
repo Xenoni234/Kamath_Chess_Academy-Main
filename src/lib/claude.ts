@@ -1,6 +1,24 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+let client: Anthropic | null = null;
+
+/**
+ * Lazily construct the SDK client. Building it at module scope meant every
+ * route that merely imported this file blew up when ANTHROPIC_API_KEY was
+ * unset; now only the calls that actually need Claude fail, and with a message
+ * that says why.
+ */
+function anthropicClient(): Anthropic {
+  if (client) return client;
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not configured");
+  }
+
+  client = new Anthropic({ apiKey });
+  return client;
+}
 
 export type ChessMoveExplanationParams = {
   fen: string;
@@ -14,8 +32,13 @@ export type ChessMoveExplanationParams = {
 export type GameReportStats = {
   username: string;
   totalGames: number;
+  /** How many of the player's own moves the engine actually scored. */
+  movesAnalyzed: number;
   overallAccuracy: number;
+  /** Percentages of the player's analysed moves, not of games. */
   blunderRate: number;
+  mistakeRate: number;
+  inaccuracyRate: number;
   openingAccuracy: number;
   middlegameAccuracy: number;
   endgameAccuracy: number;
@@ -44,7 +67,7 @@ Top alternatives:
 ${alternatives}`;
 }
 
-function textFromMessage(message: Awaited<ReturnType<typeof anthropic.messages.create>>) {
+function textFromMessage(message: Anthropic.Messages.Message) {
   if ("content" in message) {
     return message.content
       .filter((block) => block.type === "text")
@@ -57,7 +80,7 @@ function textFromMessage(message: Awaited<ReturnType<typeof anthropic.messages.c
 }
 
 export async function explainChessMove(params: ChessMoveExplanationParams): Promise<string> {
-  const message = await anthropic.messages.create({
+  const message = await anthropicClient().messages.create({
     model: MODEL,
     max_tokens: 200,
     system: MOVE_EXPLANATION_SYSTEM,
@@ -68,7 +91,7 @@ export async function explainChessMove(params: ChessMoveExplanationParams): Prom
 }
 
 export async function* streamChessMoveExplanation(params: ChessMoveExplanationParams): AsyncGenerator<string> {
-  const stream = anthropic.messages.stream({
+  const stream = anthropicClient().messages.stream({
     model: MODEL,
     max_tokens: 200,
     system: MOVE_EXPLANATION_SYSTEM,
@@ -83,25 +106,28 @@ export async function* streamChessMoveExplanation(params: ChessMoveExplanationPa
 }
 
 export async function generateGameReportNarrative(stats: GameReportStats): Promise<string> {
-  const message = await anthropic.messages.create({
+  const message = await anthropicClient().messages.create({
     model: MODEL,
     max_tokens: 400,
     system: "You are a chess coach writing a concise performance report for a student.",
     messages: [
       {
         role: "user",
-        content: `Write a 3-paragraph performance report for ${stats.username}. Include an overall assessment with numbers, key strengths, and the top 2-3 improvement areas with actionable advice.
+        content: `Write a 3-paragraph performance report for ${stats.username}. Include an overall assessment with numbers, key strengths, and the top 2-3 improvement areas with actionable advice. Every figure below comes from a Stockfish analysis of the player's own moves — cite them, and do not invent any others.
 
 Stats:
-Total games: ${stats.totalGames}
-Overall accuracy: ${stats.overallAccuracy}
-Blunder rate: ${stats.blunderRate}
-Opening accuracy: ${stats.openingAccuracy}
-Middlegame accuracy: ${stats.middlegameAccuracy}
-Endgame accuracy: ${stats.endgameAccuracy}
+Games analysed: ${stats.totalGames}
+Own moves analysed: ${stats.movesAnalyzed}
+Overall accuracy: ${stats.overallAccuracy}%
+Blunder rate: ${stats.blunderRate}% of moves
+Mistake rate: ${stats.mistakeRate}% of moves
+Inaccuracy rate: ${stats.inaccuracyRate}% of moves
+Opening accuracy: ${stats.openingAccuracy}%
+Middlegame accuracy: ${stats.middlegameAccuracy}%
+Endgame accuracy: ${stats.endgameAccuracy}%
 Top openings: ${JSON.stringify(stats.topOpenings)}
 Weakest openings: ${JSON.stringify(stats.weakestOpenings)}
-Tactical patterns missed: ${stats.tacticalPatternsMissed.join(", ") || "None identified"}`,
+Recurring problems behind their blunders: ${stats.tacticalPatternsMissed.join(", ") || "none clearly identified — say so rather than guessing"}`,
       },
     ],
   });
