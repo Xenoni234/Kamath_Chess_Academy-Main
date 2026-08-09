@@ -1,59 +1,173 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, Plus, FileClock, CheckCircle, ChevronRight, Download, BrainCircuit, X, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, Download, FileText, Loader2, Plus, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-type ReportStatus = "completed" | "generating" | "failed";
+type ReportStatus = "pending" | "processing" | "complete" | "failed";
 
-interface Report {
+type Report = {
   id: string;
-  date: string;
-  opponent: string;
-  result: string;
   status: ReportStatus;
-  accuracy: number;
-}
+  lichessId: string | null;
+  chesscomId: string | null;
+  gamesAnalyzed: number;
+  summary: string | null;
+  emailSentAt: string | null;
+  createdAt: string;
+};
+
+const POLL_INTERVAL_MS = 3000;
+/** Reports take minutes (engine analysis + PDF + email); give up well after. */
+const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+
+const STATUS_STYLES: Record<ReportStatus, string> = {
+  pending: "bg-kca-gray-600/20 text-kca-gray-100 border border-kca-gray-600/30",
+  processing: "bg-kca-cyan/10 text-kca-cyan border border-kca-cyan/30",
+  complete: "bg-kca-success/10 text-kca-success border border-kca-success/20",
+  failed: "bg-kca-danger/10 text-kca-danger border border-kca-danger/20",
+};
+
+const STATUS_LABELS: Record<ReportStatus, string> = {
+  pending: "Queued",
+  processing: "Analysing",
+  complete: "Ready",
+  failed: "Failed",
+};
 
 export default function ReportsPage() {
-  const [reports, setReports] = useState<Report[]>([
-    { id: "1", date: "2023-11-15", opponent: "Stockfish (Level 15)", result: "Draw", status: "completed", accuracy: 88 },
-    { id: "2", date: "2023-11-12", opponent: "MagnusC", result: "Loss", status: "completed", accuracy: 74 },
-    { id: "3", date: "2023-11-10", opponent: "HikaruN", result: "Win", status: "completed", accuracy: 92 },
-  ]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [gamePgn, setGamePgn] = useState("");
+  const [reports, setReports] = useState<Report[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
 
-  const handleGenerate = () => {
-    if (!gamePgn.trim()) return;
-    setIsGenerating(true);
-    
-    // Simulate generation delay
-    setTimeout(() => {
-       const newReport: Report = {
-          id: Date.now().toString(),
-          date: new Date().toISOString().split("T")[0],
-          opponent: "Unknown",
-          result: "Analysis",
-          status: "completed",
-          accuracy: Math.floor(Math.random() * 20) + 80 // random 80-100
-       };
-       setReports([newReport, ...reports]);
-       setIsGenerating(false);
-       setIsModalOpen(false);
-       setGamePgn("");
-    }, 3000);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [lichessId, setLichessId] = useState("");
+  const [chesscomId, setChesscomId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartedAtRef = useRef<number>(0);
+
+  const loadReports = useCallback(async () => {
+    try {
+      const response = await fetch("/api/reports");
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setListError(data.message ?? "Could not load your reports.");
+        return [] as Report[];
+      }
+      setListError(null);
+      setReports(data.reports ?? []);
+      return (data.reports ?? []) as Report[];
+    } catch {
+      setListError("Could not load your reports.");
+      return [] as Report[];
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadReports().finally(() => setIsLoading(false));
+  }, [loadReports]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  /** Poll the list while anything is still being generated. */
+  const startPolling = useCallback(() => {
+    stopPolling();
+    pollStartedAtRef.current = Date.now();
+
+    pollTimerRef.current = setInterval(() => {
+      if (Date.now() - pollStartedAtRef.current > POLL_TIMEOUT_MS) {
+        stopPolling();
+        return;
+      }
+
+      void loadReports().then((next) => {
+        const stillWorking = next.some(
+          (report) => report.status === "pending" || report.status === "processing",
+        );
+        if (!stillWorking) stopPolling();
+      });
+    }, POLL_INTERVAL_MS);
+  }, [loadReports, stopPolling]);
+
+  // Resume polling if a report was already in flight when the page loaded.
+  useEffect(() => {
+    const stillWorking = reports.some(
+      (report) => report.status === "pending" || report.status === "processing",
+    );
+    if (stillWorking && !pollTimerRef.current) startPolling();
+    if (!stillWorking && pollTimerRef.current) stopPolling();
+  }, [reports, startPolling, stopPolling]);
+
+  useEffect(() => stopPolling, [stopPolling]);
+
+  const handleGenerate = async () => {
+    const lichess = lichessId.trim();
+    const chesscom = chesscomId.trim();
+
+    if (!lichess && !chesscom) {
+      setFormError("Enter at least one username.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFormError(null);
+
+    try {
+      const response = await fetch("/api/reports/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(lichess ? { lichessId: lichess } : {}),
+          ...(chesscom ? { chesscomId: chesscom } : {}),
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        setFormError(data.message ?? "Could not start the report.");
+        return;
+      }
+
+      setIsModalOpen(false);
+      setLichessId("");
+      setChesscomId("");
+      await loadReports();
+      startPolling();
+    } catch {
+      setFormError("Could not start the report.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="p-6 w-full max-w-5xl mx-auto overflow-y-auto h-[calc(100vh-4rem)]">
-      <div className="flex justify-between items-center mb-8">
+    <div className="w-full max-w-5xl mx-auto">
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-kca-white mb-2">Game Reports</h1>
-          <p className="text-sm text-kca-gray-400">Deep AI analysis of your past games.</p>
+          <p className="text-sm text-kca-gray-400">
+            Stockfish analyses your recent online games and your AI coach writes up what to work
+            on. The finished PDF is emailed to you.
+          </p>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="btn-primary py-2 px-4 flex items-center gap-2">
-          <Plus className="w-4 h-4" /> New Report
+        <button
+          type="button"
+          onClick={() => {
+            setFormError(null);
+            setIsModalOpen(true);
+          }}
+          className="btn-primary py-2.5 px-5 text-sm flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          New report
         </button>
       </div>
 
@@ -63,122 +177,171 @@ export default function ReportsPage() {
             <thead className="text-xs text-kca-gray-400 bg-kca-black/50 uppercase tracking-wider border-b border-kca-border">
               <tr>
                 <th className="px-6 py-4 font-semibold">Date</th>
-                <th className="px-6 py-4 font-semibold">Opponent</th>
-                <th className="px-6 py-4 font-semibold">Result</th>
-                <th className="px-6 py-4 font-semibold">Accuracy</th>
+                <th className="px-6 py-4 font-semibold">Account</th>
+                <th className="px-6 py-4 font-semibold">Games</th>
                 <th className="px-6 py-4 font-semibold">Status</th>
-                <th className="px-6 py-4 font-semibold text-right">Actions</th>
+                <th className="px-6 py-4 font-semibold text-right">PDF</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-kca-border/50">
               {reports.map((report) => (
-                <tr key={report.id} className="hover:bg-kca-surface-2 transition-colors">
-                  <td className="px-6 py-4 font-medium text-kca-white">
-                    {new Date(report.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                <tr key={report.id} className="hover:bg-kca-surface-2 transition-colors align-top">
+                  <td className="px-6 py-4 font-medium text-kca-white whitespace-nowrap">
+                    {new Date(report.createdAt).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
                   </td>
-                  <td className="px-6 py-4 text-kca-gray-300">
-                    {report.opponent}
-                  </td>
-                  <td className="px-6 py-4">
-                     <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                        report.result === "Win" ? "bg-kca-success/10 text-kca-success border border-kca-success/20" : 
-                        report.result === "Loss" ? "bg-kca-error/10 text-kca-error border border-kca-error/20" : 
-                        "bg-kca-gray-500/20 text-kca-gray-300 border border-kca-gray-500/30"
-                     }`}>
-                        {report.result}
-                     </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                       <span className={`font-bold ${report.accuracy >= 90 ? "text-kca-cyan" : report.accuracy >= 80 ? "text-kca-success" : "text-kca-warning"}`}>
-                          {report.accuracy}%
-                       </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    {report.status === "completed" && (
-                       <span className="flex items-center gap-1.5 text-kca-success text-xs font-semibold">
-                          <CheckCircle className="w-3 h-3" /> Completed
-                       </span>
+                  <td className="px-6 py-4 text-kca-gray-100">
+                    {report.lichessId && (
+                      <span className="block font-mono text-xs">lichess: {report.lichessId}</span>
                     )}
-                    {report.status === "generating" && (
-                       <span className="flex items-center gap-1.5 text-kca-cyan text-xs font-semibold">
-                          <Loader2 className="w-3 h-3 animate-spin" /> Analyzing
-                       </span>
+                    {report.chesscomId && (
+                      <span className="block font-mono text-xs">
+                        chess.com: {report.chesscomId}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 font-mono text-kca-gray-100">
+                    {report.gamesAnalyzed || "—"}
+                  </td>
+                  <td className="px-6 py-4">
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider",
+                        STATUS_STYLES[report.status],
+                      )}
+                    >
+                      {(report.status === "pending" || report.status === "processing") && (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      )}
+                      {STATUS_LABELS[report.status]}
+                    </span>
+                    {report.status === "failed" && report.summary && (
+                      <p className="mt-1.5 text-[11px] text-kca-gray-400 max-w-[240px]">
+                        {report.summary}
+                      </p>
                     )}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button disabled={report.status !== "completed"} className="text-kca-gray-400 hover:text-kca-cyan transition-colors disabled:opacity-50 p-2">
-                       <ChevronRight className="w-5 h-5" />
-                    </button>
+                    {report.status === "complete" ? (
+                      <a
+                        href={`/api/reports/${report.id}/download`}
+                        className="inline-flex items-center gap-1.5 text-xs text-kca-cyan hover:underline"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download
+                      </a>
+                    ) : (
+                      <span className="text-kca-gray-600">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
-              
-              {reports.length === 0 && (
-                 <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-kca-gray-500">
-                       <FileText className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                       <p>No game reports generated yet.</p>
-                       <button onClick={() => setIsModalOpen(true)} className="text-kca-cyan text-xs hover:underline mt-2 inline-block">Generate your first report</button>
-                    </td>
-                 </tr>
+
+              {isLoading && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-kca-gray-500">
+                    <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin text-kca-cyan" />
+                    <p>Loading your reports…</p>
+                  </td>
+                </tr>
+              )}
+
+              {!isLoading && listError && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-kca-danger text-sm">
+                    {listError}
+                  </td>
+                </tr>
+              )}
+
+              {!isLoading && !listError && reports.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-kca-gray-500">
+                    <FileText className="w-8 h-8 mx-auto mb-3 opacity-20" />
+                    <p>No reports yet.</p>
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(true)}
+                      className="text-kca-cyan text-xs hover:underline mt-2"
+                    >
+                      Generate your first report
+                    </button>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Generate Report Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-kca-black/85 backdrop-blur-sm p-4">
-          <div className="card w-full max-w-lg bg-kca-surface border border-kca-border shadow-cyan-md rounded-2xl overflow-hidden flex flex-col max-h-full">
-            <div className="p-6 border-b border-kca-border flex justify-between items-center bg-kca-black/30">
-              <h2 className="text-xl font-display font-bold text-kca-white flex items-center gap-2">
-                 <BrainCircuit className="w-5 h-5 text-kca-cyan" /> Generate AI Report
-              </h2>
-              <button onClick={() => !isGenerating && setIsModalOpen(false)} className="text-kca-gray-400 hover:text-kca-white transition-colors" disabled={isGenerating}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-kca-black/90 backdrop-blur-md p-4">
+          <div className="card w-full max-w-md bg-kca-surface border border-kca-border p-6">
+            <div className="flex items-start justify-between gap-4 mb-1">
+              <h2 className="text-xl font-display font-bold text-kca-white">Generate a report</h2>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                aria-label="Close"
+                className="text-kca-gray-400 hover:text-kca-white transition-colors"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
-            <div className="p-6 overflow-y-auto">
-               <p className="text-sm text-kca-gray-300 mb-4 leading-relaxed">
-                  Paste the PGN (Portable Game Notation) of your game below. Our AI coach will analyze the game move-by-move to calculate accuracy, identify blunders, and provide personalized advice.
-               </p>
-               
-               <div className="mb-4">
-                  <label className="block text-xs font-semibold text-kca-gray-400 uppercase tracking-wider mb-2">Game PGN</label>
-                  <textarea 
-                     value={gamePgn}
-                     onChange={(e) => setGamePgn(e.target.value)}
-                     disabled={isGenerating}
-                     placeholder="[Event &quot;Live Chess&quot;]&#10;[Site &quot;Chess.com&quot;]&#10;...&#10;1. e4 e5 2. Nf3 ..."
-                     className="w-full bg-kca-black/50 border border-kca-border rounded-lg p-3 text-sm text-kca-white font-mono h-40 focus:outline-none focus:border-kca-cyan transition-colors resize-none placeholder:text-kca-gray-600"
-                  />
-               </div>
-            </div>
-            
-            <div className="p-6 border-t border-kca-border bg-kca-black/30 flex justify-end gap-3">
-               <button 
-                  onClick={() => setIsModalOpen(false)} 
-                  disabled={isGenerating}
-                  className="px-4 py-2 text-sm font-semibold text-kca-gray-300 hover:text-kca-white transition-colors"
-               >
-                  Cancel
-               </button>
-               <button 
-                  onClick={handleGenerate} 
-                  disabled={isGenerating || !gamePgn.trim()}
-                  className="btn-primary py-2 px-6 flex items-center gap-2 min-w-[140px] justify-center disabled:opacity-50"
-               >
-                  {isGenerating ? (
-                     <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing...</>
-                  ) : (
-                     <><FileClock className="w-4 h-4" /> Generate</>
-                  )}
-               </button>
-            </div>
+            <p className="text-sm text-kca-gray-400 mb-5">
+              Enter the online account to analyse. We read your recent public games — no password
+              needed.
+            </p>
+
+            <label className="block text-[11px] uppercase tracking-wider text-kca-gray-400 mb-1.5">
+              Lichess username
+            </label>
+            <input
+              value={lichessId}
+              onChange={(event) => setLichessId(event.target.value)}
+              placeholder="e.g. DrNykterstein"
+              className="input-field w-full mb-4"
+            />
+
+            <label className="block text-[11px] uppercase tracking-wider text-kca-gray-400 mb-1.5">
+              Chess.com username
+            </label>
+            <input
+              value={chesscomId}
+              onChange={(event) => setChesscomId(event.target.value)}
+              placeholder="e.g. MagnusCarlsen"
+              className="input-field w-full mb-2"
+            />
+
+            <p className="text-[11px] text-kca-gray-600 mb-4">
+              At least one is required. Analysis takes a few minutes — you can leave this page.
+            </p>
+
+            {formError && (
+              <p className="flex items-start gap-2 text-sm text-kca-danger mb-4">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                {formError}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void handleGenerate()}
+              disabled={isSubmitting}
+              className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Starting…
+                </span>
+              ) : (
+                "Start analysis"
+              )}
+            </button>
           </div>
         </div>
       )}

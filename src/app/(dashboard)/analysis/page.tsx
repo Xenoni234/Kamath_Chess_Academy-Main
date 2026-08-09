@@ -1,29 +1,21 @@
 "use client";
 
-import Link from "next/link";
-import { Activity, ArrowLeft } from "lucide-react";
+import { Suspense } from "react";
+import { Loader2 } from "lucide-react";
+import AnalysisBoardClient from "./AnalysisBoardClient";
 
+// The board reads ?gameId= via useSearchParams, which Next requires to sit
+// inside a Suspense boundary.
 export default function AnalysisPage() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
-      <div className="w-20 h-20 rounded-2xl bg-kca-cyan/10 border border-kca-cyan/30 flex items-center justify-center">
-        <Activity className="w-10 h-10 text-kca-cyan" />
-      </div>
-      <div>
-        <h1 className="text-2xl font-display font-bold text-kca-white mb-2">
-          Analysis Board
-        </h1>
-        <p className="text-sm text-kca-gray-400 max-w-md">
-          This feature is being built. Coming soon in Phase 2.
-        </p>
-      </div>
-      <Link
-        href="/dashboard/student"
-        className="btn-secondary py-2 px-5 text-sm flex items-center gap-2 border border-kca-border hover:border-kca-cyan/50 hover:bg-kca-cyan/5"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Dashboard
-      </Link>
-    </div>
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="w-8 h-8 animate-spin text-kca-cyan" />
+        </div>
+      }
+    >
+      <AnalysisBoardClient />
+    </Suspense>
   );
 }

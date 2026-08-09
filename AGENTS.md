@@ -56,7 +56,7 @@ in `src/proxy.ts` (this Next.js version names middleware `proxy`, not
 | Validation | Zod | Every API route and socket payload |
 | Chess logic | `chess.js` | Server-side move validation is authoritative |
 | Board UI | `react-chessboard` | |
-| Engine | `stockfish.js` at `public/stockfish.js` | Runs as a browser Web Worker |
+| Engine | Stockfish 18 Lite WASM in `public/engine/` | Browser Web Worker + Node; needs COOP/COEP |
 | AI | Anthropic Claude API (`@anthropic-ai/sdk`) | Move explanations, report narratives |
 | Email | Resend | OTP, invoices, reports |
 | PDF | Puppeteer | Report and invoice generation |
@@ -84,10 +84,10 @@ Sub-features and status (see "Current state" for detail):
 - ✅ Live-play hardening (server-side flag/timeout, illegal-move handling, exit)
 - ✅ Puzzle system — solving UI, SM-2 spaced repetition, difficulty + theme
   filters, streak/solved stats, 500k-puzzle Lichess bank (GIN-indexed themes)
-- ⬜ Analysis board (in-browser Stockfish + streaming Claude explanations)
-- ⬜ Play vs engine at adjustable difficulty
-- ⬜ Opening preparation via the Lichess Explorer API
-- ⬜ Game reports (fetch games → analyse → Claude narrative → PDF → email)
+- ✅ Analysis board (multi-threaded Stockfish 18 + streaming Claude explanations)
+- ✅ Play vs engine at adjustable difficulty
+- ✅ Opening preparation via the Lichess Explorer API
+- ✅ Game reports (fetch games → engine analysis → Claude narrative → PDF → email)
 
 ### Phase 3 — Academy operations 📋 PLANNED
 Arena / Swiss / Round Robin tournaments with live leaderboards, class
@@ -114,7 +114,7 @@ push notifications.
 
 ## Current state — read carefully
 
-Phase 2 is well underway. **Done and verified this phase:**
+Phase 2 is feature-complete. **Done and verified this phase:**
 
 - **Puzzles** — full solving UI at `/dashboard/puzzles`
   (`src/app/(dashboard)/puzzles/page.tsx`): loads a puzzle, auto-plays the
@@ -133,17 +133,50 @@ Phase 2 is well underway. **Done and verified this phase:**
   real remaining time), illegal-move snap-back, per-player board orientation,
   a "Playing as <user>" indicator, and exit-to-dashboard on the result modal.
 
-**Still to build in Phase 2** (backend routes and some UI exist but are
-unverified — do NOT assume they work):
+- **Chess engine** — Stockfish 18 Lite (WASM, NNUE). `scripts/copyEngine.mjs`
+  copies the multi-threaded and single-threaded builds from the `stockfish`
+  devDependency into `public/engine/` (gitignored) on `predev`/`prebuild`.
+  `server.mjs` sets COOP/COEP so the page is cross-origin isolated and
+  `SharedArrayBuffer` is available; `src/lib/engine/select.ts` falls back to
+  the single-threaded build, then the old `public/stockfish.js` asm.js build,
+  when it is not. Measured ~3.1M nps in-browser, depth 16 MultiPV 3 in ~1 s.
+  - `src/lib/engine/uci.ts` — UCI parsing (browser + server share it)
+  - `src/lib/engine/classify.ts` — Lichess-compatible win% / accuracy /
+    move classification, so board and reports never disagree
+  - `src/lib/engine/analysis.ts` — game-tree building and per-move grading
+  - `src/hooks/useStockfish.ts` — worker driver with a cancellable queue,
+    MultiPV, `Skill Level` / `UCI_Elo`
+  - `src/lib/engine/serverEngine.ts` — the same build under Node, for reports
+- **Analysis board** — `/dashboard/analysis`. Live MultiPV-3 eval, eval bar,
+  best-move arrow, keyboard navigation, full-game review with per-move
+  classification and per-side accuracy, and streaming Claude explanations.
+  Loads from games history (`?gameId=`), a PGN (`?pgn=` or paste), a FEN, or
+  free play. **Analysis is not persisted** — a reload re-runs the scan.
+- **Play vs engine** — `/dashboard/play-engine`. 8 difficulty levels mapped to
+  `Skill Level` + `UCI_Elo`, colour choice, hint, takeback, resign. Entirely
+  local: no Socket.io, no `Game` row, unrated.
+- **Opening explorer** — `/dashboard/openings`, backed by
+  `/api/analysis/opening` (24 h `OpeningCache`). Note the upstream moved to
+  `explorer.lichess.org` and **now requires OAuth** — set `LICHESS_API_TOKEN`
+  or the route returns 502.
+- **Game reports** — `/dashboard/reports` is wired to the real API and polls
+  for status. `src/lib/reports/gameStats.ts` replaced the old
+  `Math.random()` accuracy with genuine Stockfish analysis of the player's own
+  moves (depth 12, first 8 plies skipped as book, capped at 20 games / 1500
+  positions). Verified against real Lichess data: Magnus scores 92.9%, his
+  opponents 90.7% with a 3.1% blunder rate.
 
-- **Analysis board** — `src/hooks/useStockfish.ts` + `/api/analysis/explain`
-  exist; the in-browser Stockfish worker (`public/stockfish.js`) is not
-  confirmed working. `src/lib/claude.ts` has the streaming-explanation helper.
-- **Play vs engine** — page exists, depends on the same Stockfish integration.
-- **Opening prep** — `/api/analysis/opening` (Lichess Explorer) + page exist,
-  unverified.
-- **Game reports** — `/api/reports/generate` (Puppeteer PDF + Resend email)
-  exists, but the Reports UI is still **mock data**, not wired to it.
+**Known gaps / follow-ups:**
+
+- `ANTHROPIC_API_KEY` and `LICHESS_API_TOKEN` must be set in `.env.local`;
+  both are in `.env.example`. Claude's client is lazily constructed, so a
+  missing key fails the request rather than the import.
+- Report PDFs are written to `/tmp` and served by
+  `/api/reports/[reportId]/download`; that path is ephemeral and per-instance,
+  so the emailed attachment is the durable copy.
+- Report generation is still `setImmediate` fire-and-forget. `bullmq` is a
+  dependency but a real queue is Phase 3 work — a restart mid-job leaves the
+  row stuck in `processing`.
 
 ### Resolved issues (kept for history)
 
@@ -242,7 +275,9 @@ Reusable classes already defined in `globals.css`: `.btn-primary`,
 
 ```bash
 npm run dev          # starts server.mjs — must print "Socket.io server attached"
+npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})
 npx tsc --noEmit     # type check, must pass with zero errors
+npm run build        # production build — the strictest gate
 npm run lint
 npx prisma generate
 npx prisma studio    # browse the database

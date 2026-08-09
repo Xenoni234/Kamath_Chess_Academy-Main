@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
-import { streamChessMoveExplanation, type ChessMoveExplanationParams } from "@/lib/claude";
+import { streamChessMoveExplanation } from "@/lib/claude";
 import { explainMoveSchema } from "@/lib/validations/phase2";
 
 export const runtime = "nodejs";
@@ -32,20 +32,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Rate limit exceeded" }, { status: 429 });
     }
 
+    const encoder = new TextEncoder();
+
     return new Response(
       new ReadableStream({
         async start(controller) {
           try {
             for await (const chunk of streamChessMoveExplanation(params)) {
-              controller.enqueue(new TextEncoder().encode(chunk));
+              // Stop pulling from Claude as soon as the reader goes away —
+              // otherwise a user navigating mid-explanation keeps burning
+              // tokens until the response completes.
+              if (request.signal.aborted) break;
+              controller.enqueue(encoder.encode(chunk));
             }
             controller.close();
           } catch (error) {
+            if (request.signal.aborted) {
+              controller.close();
+              return;
+            }
+            console.error("Move explanation stream failed:", error);
             controller.error(error);
           }
         },
       }),
-      { headers: { "Content-Type": "text/plain; charset=utf-8" } },
+      {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          // Keeps reverse proxies from buffering the whole body before
+          // forwarding, which would defeat streaming.
+          "X-Accel-Buffering": "no",
+        },
+      },
     );
   } catch {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });

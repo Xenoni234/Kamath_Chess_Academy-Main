@@ -4,12 +4,20 @@ import { useState } from "react";
 import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 
+export type BoardArrow = {
+  startSquare: string;
+  endSquare: string;
+  color: string;
+};
+
 type ChessBoardProps = {
   fen: string;
   orientation: "white" | "black";
   onMove: (from: string, to: string, promotion?: string) => void;
   disabled?: boolean;
   lastMove?: string;
+  /** Overlay arrows — the analysis board uses these for the engine's best move. */
+  arrows?: BoardArrow[];
 };
 
 export default function ChessBoard({
@@ -18,6 +26,7 @@ export default function ChessBoard({
   onMove,
   disabled = false,
   lastMove,
+  arrows,
 }: ChessBoardProps) {
   const [pendingPromotion, setPendingPromotion] = useState<{
     from: string;
@@ -119,6 +128,7 @@ export default function ChessBoard({
           darkSquareStyle: { backgroundColor: "#769656" },
           lightSquareStyle: { backgroundColor: "#EEEED2" },
           squareStyles: customSquareStyles,
+          arrows: arrows ?? [],
         }}
       />
 

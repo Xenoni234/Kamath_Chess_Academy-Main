@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Trophy, ChevronRight, Loader2 } from "lucide-react";
+import { Trophy, ChevronRight, Loader2, Activity } from "lucide-react";
 
 type GameResult = "win" | "loss" | "draw" | "aborted";
 
@@ -97,10 +97,20 @@ export default function GamesPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-right">
-                    <Link href={`/game/${game.id}`} className="inline-block text-kca-gray-400 hover:text-kca-cyan transition-colors p-2">
-                      <ChevronRight className="w-5 h-5" />
-                    </Link>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center justify-end gap-1">
+                      <Link
+                        href={`/dashboard/analysis?gameId=${game.id}`}
+                        className="inline-flex items-center gap-1.5 text-xs text-kca-gray-400 hover:text-kca-cyan transition-colors px-2 py-1.5 rounded-lg hover:bg-kca-cyan/5"
+                        title="Open in the analysis board"
+                      >
+                        <Activity className="w-4 h-4" />
+                        <span className="hidden sm:inline">Analyse</span>
+                      </Link>
+                      <Link href={`/game/${game.id}`} className="inline-block text-kca-gray-400 hover:text-kca-cyan transition-colors p-2" title="View game">
+                        <ChevronRight className="w-5 h-5" />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Stockfish WASM builds copied out of node_modules by scripts/copyEngine.mjs
+/public/engine/
+
 # puzzle data dumps (large Lichess CSVs — imported into the DB, never committed)
 *.csv
 *.csv.zst
