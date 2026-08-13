@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
-import { streamChessMoveExplanation } from "@/lib/claude";
+import { isClaudeConfigured, streamChessMoveExplanation } from "@/lib/claude";
 import { explainMoveSchema } from "@/lib/validations/phase2";
 
 export const runtime = "nodejs";
@@ -20,6 +20,14 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ success: false, message: "Invalid request payload" }, { status: 400 });
     }
+    // Checked before the stream opens — afterwards the status code is fixed.
+    if (!isClaudeConfigured()) {
+      return NextResponse.json(
+        { success: false, message: "AI explanations are not configured on this server." },
+        { status: 503 },
+      );
+    }
+
     const params = parsed.data;
     const key = `rate:analysis:${payload.userId}`;
     const count = await redis.incr(key);
