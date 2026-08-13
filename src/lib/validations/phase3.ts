@@ -26,3 +26,10 @@ export const createClassSchema = z.object({
 export const enrollSchema = z.object({
   studentUserId: z.string().min(1, "Pick a student"),
 });
+
+export const createTournamentSchema = z.object({
+  title: z.string().min(2, "Title must be at least 2 characters").max(120),
+  description: z.string().max(500).optional(),
+  type: z.enum(["ARENA", "SWISS", "ROUND_ROBIN"]),
+  startsAt: dateString,
+});

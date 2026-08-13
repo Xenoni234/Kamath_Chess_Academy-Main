@@ -6,6 +6,7 @@ import { db } from "../db.ts";
 import { redis } from "../redis.ts";
 import { calculateTimeAfterMove as calculateClockAfterMove, parseTimeControl } from "./clockManager.ts";
 import { updateRatings } from "./ratingEngine.ts";
+import { applyTournamentResult } from "../tournament/scoring.ts";
 
 export type GameState = {
   gameId: string;
@@ -219,6 +220,12 @@ export async function finalizeGame(gameState: GameState, io: Server): Promise<vo
   });
 
   io.to(gameKey(finalState.gameId)).emit("game:end", finalState);
+
+  if (finalState.tournamentId) {
+    await applyTournamentResult(finalState, io).catch((err) =>
+      console.error("Tournament scoring failed:", err));
+  }
+
   setTimeout(() => {
     redis.del(gameKey(finalState.gameId)).catch(err =>
       console.error("Failed to clean up game from Redis:", err));
