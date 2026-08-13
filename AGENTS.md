@@ -77,7 +77,7 @@ Redis-backed game state, server-authoritative clocks, game lobby (open
 challenges + quick pair matchmaking), spectator mode, Glicko-2 ratings per
 time format, presence tracking, real OTP via Resend.
 
-### Phase 2 — Analysis & learning 🔨 IN PROGRESS (current phase)
+### Phase 2 — Analysis & learning ✅ COMPLETE
 Sub-features and status (see "Current state" for detail):
 - ✅ App-wide light/dark theme with a persisted toggle
 - ✅ Games history (all time formats) page
@@ -89,18 +89,43 @@ Sub-features and status (see "Current state" for detail):
 - ✅ Opening preparation via the Lichess Explorer API
 - ✅ Game reports (fetch games → engine analysis → Claude narrative → PDF → email)
 
-### Phase 3 — Academy operations 📋 PLANNED
-Arena / Swiss / Round Robin tournaments with live leaderboards, class
-scheduling (HR assigns coaches to batches), coach and parent dashboards with
-real data, Razorpay payments, auto-generated PDF invoices, notification system.
+### Phase 3 — Academy operations ✅ COMPLETE
+Arena / Swiss / Round Robin tournaments with live standings, class scheduling
+(HR assigns coaches to batches), role dashboards wired to real data,
+notification system with a live bell, durable BullMQ job queue on a dedicated
+TCP Redis, and `requireRole` / `writeAuditLog` helpers. **Razorpay is
+deliberately deferred** — the scaffold in `src/lib/razorpay.ts` is inactive
+(`isPaymentsEnabled()` returns false) and the site stays free during the first
+3 months of testing.
 
-### Phase 4 — Digital Second AI 📋 PLANNED
-The flagship feature. Profile any opponent from their Lichess/Chess.com/FIDE
-history using time-decay weighting, build an opening Trie of their repertoire,
-detect weaknesses (low accuracy + high clock time on the same positions), use a
-Neo4j graph to find transposition move-orders that bypass their known
-preparation, mine playable novelties with Stockfish, and have Claude generate a
-15–20 move annotated repertoire targeting that specific opponent.
+### Phase 4 — Digital Second AI ✅ COMPLETE (current phase)
+The flagship feature: profile any opponent from their Lichess/Chess.com history
+and generate an annotated repertoire aimed at that specific player. All code
+lives under `src/lib/second/`:
+- ✅ **Ingestion** (`ingest.ts`) — Lichess ndjson + Chess.com archives, with
+  clocks and timestamps. **Time-decay weighting is relative to the player's own
+  most recent game** (`weight = 0.5 ** (ageDays / 180)`), so an inactive player
+  still profiles correctly. 24 h Redis cache of the compact form.
+- ✅ **Opening Trie** (`trie.ts`) — SAN-keyed repertoire tree per colour,
+  weighted counts + score, capped at 24 plies.
+- ✅ **Weakness detection** (`weakness.ts`) — engine-grades their recurring
+  decision positions (ply 5–20) and blends accuracy with **clock pressure**:
+  positions they think long about *and* misplay.
+- ✅ **Transpositions** (`graph.ts`) — loads the Trie into **Neo4j**, MERGE-ing
+  on a 4-field FEN key (no move counters) so move-orders collapse into a DAG;
+  Cypher then finds bypass move-orders to weak targets. Opt-in: without
+  `NEO4J_*` the stage is skipped and the rest of the dossier still generates.
+- ✅ **Novelty mining** (`novelty.ts`) — engine MultiPV ∩ rare in the Lichess
+  Explorer = sound moves humans rarely play.
+- ✅ **Repertoire + PDF** (`repertoire.ts`, `pdf.ts`, `claude.ts`) — lines are
+  chosen by engine analysis; the AI layer only *annotates* them, so the template
+  provider is chess-safe and free.
+- ✅ **Job / routes / UI** (`runProfileJob.ts`, `api/second/*`,
+  `dashboard/second`) — durable via `profileQueue`, owner-only dossier +
+  download (404, never 403), audit-logged, notification on completion.
+
+**Verified end-to-end** against real accounts: 15 games profiled → 12 Trie
+lines, 8 weaknesses, 3 novelties, PDF + notification, in ~8 s.
 
 ### Phase 5 — Video classes 📋 PLANNED
 Inbuilt group video via mediasoup WebRTC SFU (no third-party API), Socket.io
@@ -174,9 +199,20 @@ Phase 2 is feature-complete. **Done and verified this phase:**
 - Report PDFs are written to `/tmp` and served by
   `/api/reports/[reportId]/download`; that path is ephemeral and per-instance,
   so the emailed attachment is the durable copy.
-- Report generation is still `setImmediate` fire-and-forget. `bullmq` is a
-  dependency but a real queue is Phase 3 work — a restart mid-job leaves the
-  row stuck in `processing`.
+- Report and profiling jobs are durable **only when `QUEUE_REDIS_URL` is set**
+  (BullMQ + `npm run worker`). Without it they fall back to inline
+  `setImmediate`, and a restart mid-job leaves the row stuck in `processing`.
+- **The Stockfish WASM module overwrites `globalThis.fetch` when it boots.**
+  `createEngine` in `src/lib/engine/serverEngine.ts` now saves and restores it.
+  Never remove that — without it, every `fetch` made *after* engine analysis in
+  the same process (opening explorer, Upstash Redis, Anthropic, Resend) fails
+  with `fetch is not a function`.
+- Dossier PDFs are written to `/tmp` (same ephemerality caveat as reports);
+  regenerating the dossier is the recovery path.
+- Phase 4 novelty mining is only as good as the explorer data: without
+  `LICHESS_API_TOKEN` it returns no novelties rather than guessing. A strong
+  opponent's mainlines legitimately yield zero novelties — that is a real
+  result, not a bug.
 
 ### Resolved issues (kept for history)
 

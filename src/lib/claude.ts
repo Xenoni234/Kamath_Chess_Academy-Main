@@ -70,6 +70,8 @@ export function isClaudeConfigured(): boolean {
 
 const MOVE_EXPLANATION_SYSTEM = "You are a chess coach explaining moves to a student.";
 const REPORT_SYSTEM = "You are a chess coach writing a concise performance report for a student.";
+const REPERTOIRE_SYSTEM =
+  "You are a chess second preparing a player for a specific opponent. You annotate lines that have already been chosen by engine analysis — never invent moves, never contradict the supplied evaluations.";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
 function moveExplanationPrompt(params: ChessMoveExplanationParams) {
@@ -105,6 +107,14 @@ Endgame accuracy: ${stats.endgameAccuracy}%
 Top openings: ${JSON.stringify(stats.topOpenings)}
 Weakest openings: ${JSON.stringify(stats.weakestOpenings)}
 Recurring problems behind their blunders: ${stats.tacticalPatternsMissed.join(", ") || "none clearly identified — say so rather than guessing"}`;
+}
+
+function repertoirePrompt(description: string) {
+  return `Write an opponent-specific opening repertoire briefing, 4-6 short paragraphs, for a student preparing against this player. Structure it as: (1) who this opponent is and how they play, (2) the concrete weaknesses to target, (3) walk through the recommended lines below in order, explaining what each one exploits and what to expect in reply, (4) a short "what to do if they deviate" note.
+
+Every move, evaluation and percentage below came from Stockfish analysis of their real games — cite them, and do not introduce any move or claim that is not in this data. If a section is empty, say so plainly rather than inventing content. Address the student as "you" and refer to the opponent by their handle.
+
+${description}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +260,42 @@ function templateReportNarrative(stats: GameReportStats): string {
   return [p1, p2, p3].join("\n");
 }
 
+/**
+ * Deterministic repertoire prose. Every sentence restates data that engine
+ * analysis already produced, so the free provider never invents chess.
+ */
+function templateRepertoireNarrative(params: OpponentRepertoireParams): string {
+  const { handle, colorToPlay, gamesAnalyzed, lines, topWeakness, noveltyCount, transpositionCount } = params;
+
+  const p1 = `Preparation against ${handle}, playing ${colorToPlay}. This briefing is built from ${gamesAnalyzed} of their recent games, weighted so their current form counts most.`;
+
+  const p2 = topWeakness
+    ? `Their clearest recurring problem: after ${topWeakness.line || "the opening moves"} they usually answer ${topWeakness.move}, which Stockfish scores at only ${topWeakness.accuracy}% accuracy${topWeakness.clock !== null ? `, and they spend about ${topWeakness.clock}s on it` : ""}. That is the position to aim for.`
+    : `No single position stood out as a clear weakness in the games analysed — play your own strongest lines rather than forcing a target.`;
+
+  const p3 = lines.length
+    ? `Recommended lines, strongest first:\n${lines
+        .map((l, i) => `${i + 1}. ${l.moves.join(" ")} — ${l.rationale}`)
+        .join("\n")}`
+    : `Not enough repertoire data to recommend specific lines.`;
+
+  const p4 = `This plan includes ${noveltyCount} mined ${noveltyCount === 1 ? "novelty" : "novelties"} (engine-approved but rarely played by humans) and ${transpositionCount} transposition ${transpositionCount === 1 ? "bypass" : "bypasses"}. If they deviate from the lines above, fall back on the evaluations given rather than improvising — anything not listed here was not analysed.`;
+
+  return [p1, p2, p3, p4].join("\n\n");
+}
+
+export type OpponentRepertoireParams = {
+  handle: string;
+  colorToPlay: string;
+  gamesAnalyzed: number;
+  /** Pre-rendered artifact description (see second/repertoire.ts). */
+  description: string;
+  lines: Array<{ moves: string[]; rationale: string }>;
+  topWeakness: { line: string; move: string; accuracy: number; clock: number | null } | null;
+  noveltyCount: number;
+  transpositionCount: number;
+};
+
 // ---------------------------------------------------------------------------
 // Public API (stable across providers)
 // ---------------------------------------------------------------------------
@@ -312,4 +358,36 @@ export async function generateGameReportNarrative(stats: GameReportStats): Promi
     messages: [{ role: "user", content: reportPrompt(stats) }],
   });
   return textFromMessage(message);
+}
+
+/**
+ * Annotate an opponent-specific repertoire (Phase 4 Digital Second).
+ *
+ * The lines themselves are chosen by engine analysis before this is called —
+ * the AI layer only explains them. On any provider failure the deterministic
+ * template output is returned rather than throwing, so a dossier is always
+ * produced.
+ */
+export async function generateOpponentRepertoire(params: OpponentRepertoireParams): Promise<string> {
+  const provider = activeProvider();
+
+  if (provider === "template") return templateRepertoireNarrative(params);
+
+  try {
+    if (provider === "ollama") {
+      const text = await ollamaChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), 1200);
+      return text || templateRepertoireNarrative(params);
+    }
+
+    const message = await anthropicClient().messages.create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1200,
+      system: REPERTOIRE_SYSTEM,
+      messages: [{ role: "user", content: repertoirePrompt(params.description) }],
+    });
+    return textFromMessage(message) || templateRepertoireNarrative(params);
+  } catch (error) {
+    console.error("[second] repertoire generation failed, using template:", error);
+    return templateRepertoireNarrative(params);
+  }
 }
