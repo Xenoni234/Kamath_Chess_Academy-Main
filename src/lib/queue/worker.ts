@@ -1,7 +1,9 @@
 import { Worker, type ConnectionOptions } from "bullmq";
 import { getQueueConnection } from "./connection";
-import { REPORT_QUEUE } from "./queues";
+import { REPORT_QUEUE, PROFILE_QUEUE } from "./queues";
 import { runReportJob, type ReportJobData } from "@/lib/reports/runReportJob";
+import { runProfileJob } from "@/lib/second/runProfileJob";
+import type { ProfileJobData } from "@/lib/second/types";
 
 /**
  * Boot the BullMQ workers. Run from the standalone `worker.ts` entrypoint
@@ -31,6 +33,19 @@ export function startWorkers(): void {
   );
   reportWorker.on("completed", (job) => console.log(`[worker] report job ${job.id} completed`));
 
+  const profileWorker = new Worker<ProfileJobData>(
+    PROFILE_QUEUE,
+    async (job) => {
+      await runProfileJob(job.data);
+    },
+    { connection: connection as unknown as ConnectionOptions },
+  );
+
+  profileWorker.on("failed", (job, err) =>
+    console.error(`[worker] profile job ${job?.id ?? "?"} failed:`, err.message),
+  );
+  profileWorker.on("completed", (job) => console.log(`[worker] profile job ${job.id} completed`));
+
   // Invoice worker is registered here in Track D.
-  console.log(`[worker] started — processing queue: ${REPORT_QUEUE}`);
+  console.log(`[worker] started — processing queues: ${REPORT_QUEUE}, ${PROFILE_QUEUE}`);
 }

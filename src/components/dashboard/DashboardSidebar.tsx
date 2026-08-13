@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText, CalendarDays, CalendarPlus, Medal } from "lucide-react";
+import { Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText, CalendarDays, CalendarPlus, Medal, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -56,6 +56,7 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: "/dashboard/reports", label: "Reports", icon: FileText },
     { href: "/dashboard/games", label: "Games", icon: Trophy },
     { href: "/dashboard/tournaments", label: "Tournaments", icon: Medal },
+    { href: "/dashboard/second", label: "Second AI", icon: Brain, roles: ["STUDENT", "COACH", "HR", "HEAD"] },
     // Phase 3 items are added here per track, each with a `roles` gate.
     { href: "/dashboard/classes", label: "Classes", icon: CalendarDays },
     { href: "/dashboard/schedule", label: "Schedule", icon: CalendarPlus, roles: ["HR", "HEAD"] },

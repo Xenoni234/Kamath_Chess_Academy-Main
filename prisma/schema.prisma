@@ -70,6 +70,11 @@ enum NotificationType {
   SYSTEM
 }
 
+enum OpponentSource {
+  LICHESS
+  CHESSCOM
+}
+
 model User {
   id             String            @id @default(cuid())
   username       String            @unique
@@ -104,6 +109,7 @@ model User {
   notifications  Notification[]
   achievements   Achievement[]
   auditLogs       AuditLog[]
+  opponentProfiles OpponentProfile[]
 
   @@index([role])
   @@index([isActive])
@@ -441,4 +447,54 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([action])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Digital Second AI
+// ---------------------------------------------------------------------------
+
+/**
+ * A profiling run against one online opponent. The heavy artifact (opening
+ * Trie summary, ranked weaknesses, transposition bypass lines, novelties) is
+ * stashed as JSON once the queue job completes; `status` is a plain string and
+ * moves pending -> processing -> complete/failed exactly like GameReport.
+ */
+model OpponentProfile {
+  id            String          @id @default(cuid())
+  requestedById String
+  handle        String
+  source        OpponentSource
+  fideId        String?
+  colorToPlay   String          @default("white") // side WE play against them
+  status        String          @default("pending")
+  gamesAnalyzed Int             @default(0)
+  ratingSummary Json?
+  artifact      Json?
+  summary       String?         @db.Text
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  requestedBy   User            @relation(fields: [requestedById], references: [id], onDelete: Cascade)
+  repertoires   RepertoirePlan[]
+
+  @@index([requestedById, createdAt])
+  @@index([handle, source])
+  @@map("opponent_profiles")
+}
+
+/**
+ * The Claude-authored (or template-fallback) annotated repertoire produced for
+ * a profile. `linesJson` is the structured recommended move tree; `summary` is
+ * the prose. Latest row per profile is the current plan.
+ */
+model RepertoirePlan {
+  id        String          @id @default(cuid())
+  profileId String
+  pdfUrl    String?
+  summary   String          @db.Text
+  linesJson Json
+  createdAt DateTime        @default(now())
+  profile   OpponentProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, createdAt])
+  @@map("repertoire_plans")
 }
