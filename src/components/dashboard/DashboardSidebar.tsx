@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText } from "lucide-react";
+import { Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText, CalendarDays, CalendarPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -56,6 +56,8 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: "/dashboard/reports", label: "Reports", icon: FileText },
     { href: "/dashboard/games", label: "Games", icon: Trophy },
     // Phase 3 items are added here per track, each with a `roles` gate.
+    { href: "/dashboard/classes", label: "Classes", icon: CalendarDays },
+    { href: "/dashboard/schedule", label: "Schedule", icon: CalendarPlus, roles: ["HR", "HEAD"] },
   ];
 
   const roleUpper = role.toUpperCase();
