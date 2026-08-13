@@ -15,6 +15,15 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseBestMove, parseInfoLine, setOption } from "./uci";
 
+export type MultiPvMove = {
+  /** The move in UCI (e2e4). */
+  uci: string;
+  /** Centipawns, White's point of view. Null when mate is set. */
+  cp: number | null;
+  /** Moves to mate, White's point of view. */
+  mate: number | null;
+};
+
 const ENGINE_DIR = path.join(process.cwd(), "public", "engine");
 const ENGINE_JS = path.join(ENGINE_DIR, "stockfish-18-lite.js");
 const ENGINE_WASM = path.join(ENGINE_DIR, "stockfish-18-lite.wasm");
@@ -77,7 +86,15 @@ async function createEngine(threads: number): Promise<EngineHandle> {
     locateFile: (file: string) => (file.endsWith(".wasm") ? ENGINE_WASM : ENGINE_JS),
   };
 
+  // The Emscripten runtime clobbers the global `fetch` while it boots (it wires
+  // up its own for browser asset loading). That would break every fetch the
+  // profiling worker makes *after* the engine runs — the opening explorer,
+  // Upstash Redis, notifications. Save and restore the real one.
+  const savedFetch = globalThis.fetch;
   await initEngine()(engineModule);
+  if (globalThis.fetch !== savedFetch) {
+    globalThis.fetch = savedFetch;
+  }
 
   // Emscripten resolves its promise slightly before the engine accepts input.
   const ready = engineModule as EngineModule;
@@ -202,6 +219,100 @@ export async function analyzePositions(
       engine?.terminate?.();
     } catch {
       // The worker may already be gone; nothing useful to do here.
+    }
+  }
+}
+
+/** Collect the top `multiPv` moves for one position, ranked best-first. */
+function searchPositionMultiPV(
+  engine: EngineHandle,
+  fen: string,
+  depth: number,
+  multiPv: number,
+  timeoutMs: number,
+): Promise<MultiPvMove[]> {
+  return new Promise((resolve) => {
+    // Keep the latest line seen for each multipv index; the last snapshot before
+    // `bestmove` is the deepest one.
+    const lines = new Map<number, MultiPvMove>();
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      engine.listener = undefined;
+      resolve(
+        [...lines.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([, move]) => move),
+      );
+    };
+
+    const timer = setTimeout(() => {
+      engine.sendCommand("stop");
+      finish();
+    }, timeoutMs);
+
+    engine.listener = (line: string) => {
+      const info = parseInfoLine(line, fen);
+      if (info && info.pv.length > 0 && info.multipv <= multiPv) {
+        lines.set(info.multipv, { uci: info.pv[0], cp: info.cp, mate: info.mate });
+        return;
+      }
+      if (parseBestMove(line)) finish();
+    };
+
+    engine.sendCommand(`position fen ${fen}`);
+    engine.sendCommand(`go depth ${depth}`);
+  });
+}
+
+/**
+ * Evaluate positions returning the engine's top-N moves each (for novelty
+ * mining). Same budget/short-array contract as analyzePositions.
+ */
+export async function analyzePositionsMultiPV(
+  fens: string[],
+  options: { depth?: number; threads?: number; multiPv?: number; totalTimeoutMs?: number } = {},
+): Promise<MultiPvMove[][]> {
+  if (fens.length === 0) return [];
+
+  const depth = options.depth ?? 14;
+  const threads = options.threads ?? DEFAULT_BUDGET.threads;
+  const multiPv = options.multiPv ?? 3;
+  const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_BUDGET.totalTimeoutMs;
+
+  const results: MultiPvMove[][] = [];
+  let engine: EngineHandle | null = null;
+  const deadline = Date.now() + totalTimeoutMs;
+
+  try {
+    engine = await createEngine(threads);
+    engine.sendCommand(setOption("MultiPV", multiPv));
+    engine.sendCommand("ucinewgame");
+
+    for (const fen of fens) {
+      if (Date.now() > deadline) {
+        console.warn(
+          `[serverEngine] MultiPV budget exhausted after ${results.length}/${fens.length} positions`,
+        );
+        break;
+      }
+      const remaining = Math.max(1000, deadline - Date.now());
+      results.push(await searchPositionMultiPV(engine, fen, depth, multiPv, Math.min(20_000, remaining)));
+    }
+
+    return results;
+  } catch (error) {
+    console.error("[serverEngine] MultiPV analysis failed:", error);
+    return results;
+  } finally {
+    try {
+      engine?.sendCommand("quit");
+      engine?.terminate?.();
+    } catch {
+      // Worker may already be gone.
     }
   }
 }
