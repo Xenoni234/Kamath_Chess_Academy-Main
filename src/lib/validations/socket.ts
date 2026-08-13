@@ -18,3 +18,5 @@ export const createChallengeSchema = z.object({
 export const challengeIdSchema = z.object({ challengeId: z.string() });
 
 export const quickPairSchema = z.object({ timeControl: z.string() });
+
+export const tournamentWatchSchema = z.object({ tournamentId: z.string() });
