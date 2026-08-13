@@ -8,6 +8,7 @@ import { BookOpen, Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, Fil
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
 import ThemeToggle from "@/components/ThemeToggle";
+import NotificationBell from "@/components/dashboard/NotificationBell";
 
 type NavItem = {
   href: string;
@@ -75,6 +76,10 @@ export default function DashboardSidebar({ username, role }: { username: string;
         <div className="mt-2 inline-flex rounded-full border border-kca-cyan/30 px-3 py-1 font-display text-[11px] font-bold uppercase tracking-wider text-kca-cyan">
           {role}
         </div>
+      </div>
+
+      <div className="mb-4">
+        <NotificationBell />
       </div>
 
       <nav className="space-y-2">
