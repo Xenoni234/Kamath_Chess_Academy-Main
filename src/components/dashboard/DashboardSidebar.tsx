@@ -13,6 +13,8 @@ type NavItem = {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** If set, the item is shown only to these roles (uppercase). Absent = all. */
+  roles?: string[];
 };
 
 export default function DashboardSidebar({ username, role }: { username: string; role: string }) {
@@ -52,7 +54,11 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: "/dashboard/openings", label: "Openings", icon: Map },
     { href: "/dashboard/reports", label: "Reports", icon: FileText },
     { href: "/dashboard/games", label: "Games", icon: Trophy },
+    // Phase 3 items are added here per track, each with a `roles` gate.
   ];
+
+  const roleUpper = role.toUpperCase();
+  const visibleItems = navItems.filter((item) => !item.roles || item.roles.includes(roleUpper));
 
   return (
     <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 md:w-72 select-none">
@@ -72,7 +78,7 @@ export default function DashboardSidebar({ username, role }: { username: string;
       </div>
 
       <nav className="space-y-2">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
 
