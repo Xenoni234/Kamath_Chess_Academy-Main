@@ -8,6 +8,15 @@ let client: Anthropic | null = null;
  * unset; now only the calls that actually need Claude fail, and with a message
  * that says why.
  */
+/**
+ * Whether Claude can be called at all. Routes that stream should check this
+ * first — once a stream is open there is no way to send a status code, so a
+ * missing key would surface to the browser as a dropped connection.
+ */
+export function isClaudeConfigured(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
 function anthropicClient(): Anthropic {
   if (client) return client;
 
