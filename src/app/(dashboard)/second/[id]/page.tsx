@@ -45,8 +45,22 @@ type Weakness = {
   weaknessScore: number;
 };
 type Novelty = { line: string[]; move: string; evalCp: number | null; explorerShare: number | null };
-type Transposition = { bypass: string[]; mainLine: string[]; note: string };
-type RepLine = { moves: string[]; rationale: string; tag: string };
+type Transposition = {
+  bypass: string[];
+  mainLine: string[];
+  note: string;
+  /** `bypass` played out to a usable depth. Absent on older dossiers. */
+  extended?: string[];
+  outOfBookAtPly?: number;
+};
+type RepLine = {
+  moves: string[];
+  rationale: string;
+  tag: string;
+  /** Ply where the opponent leaves their own book; engine guesswork after this. */
+  outOfBookAtPly?: number;
+  evalCp?: number | null;
+};
 
 type Artifact = {
   handle: string;
@@ -98,6 +112,53 @@ function toPgn(moves: string[]): string {
  * A move-order, clickable through to the analysis board so the line can be
  * played out with the engine rather than just read as text.
  */
+/**
+ * A full variation: numbered movetext that wraps, with everything past the
+ * opponent's book greyed out.
+ *
+ * That distinction is the point of the panel — up to `outOfBookAtPly` these are
+ * moves this opponent has actually played, after it they are the engine's best
+ * guess. Rendering both in the same colour would imply a confidence the second
+ * half does not have.
+ */
+function LineMoves({ moves, outOfBookAtPly }: { moves: string[]; outOfBookAtPly?: number }) {
+  if (moves.length === 0) return <span className="text-kca-gray-500">(starting position)</span>;
+
+  const bookEndsAtMove =
+    outOfBookAtPly === undefined ? null : Math.floor(outOfBookAtPly / 2) + 1;
+
+  return (
+    <div className="min-w-0 space-y-1">
+      <Link
+        href={`/dashboard/analysis?pgn=${encodeURIComponent(toPgn(moves))}`}
+        title="Open this line on the analysis board"
+        className="group block font-mono text-sm leading-relaxed text-kca-white transition-colors hover:text-kca-cyan"
+      >
+        <span className="break-words">
+          {moves.map((san, i) => (
+            <span
+              key={i}
+              className={cn(
+                outOfBookAtPly !== undefined && i >= outOfBookAtPly && "text-kca-gray-500",
+              )}
+            >
+              {i % 2 === 0 ? <span className="text-kca-gray-600">{i / 2 + 1}.</span> : null}{" "}
+              {san}
+            </span>
+          ))}
+          <Play className="ml-1.5 inline h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+        </span>
+      </Link>
+      {bookEndsAtMove !== null && (
+        <p className="text-xs text-kca-gray-500">
+          In their book through move {bookEndsAtMove}; grey moves are Stockfish&apos;s continuation,
+          not lines they have played.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Moves({ moves }: { moves: string[] }) {
   if (moves.length === 0) return <span className="text-kca-gray-500">(starting position)</span>;
   return (
@@ -300,11 +361,11 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
           <ol className="space-y-3">
             {profile.repertoire.lines.map((l, i) => (
               <li key={i} className="card border border-kca-border bg-kca-surface p-4">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <span className={cn("rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", TAG_STYLES[l.tag] ?? TAG_STYLES.mainline)}>
+                <div className="mb-1.5 flex items-start gap-2">
+                  <span className={cn("mt-0.5 shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", TAG_STYLES[l.tag] ?? TAG_STYLES.mainline)}>
                     {l.tag}
                   </span>
-                  <Moves moves={l.moves} />
+                  <LineMoves moves={l.moves} outOfBookAtPly={l.outOfBookAtPly} />
                 </div>
                 <p className="text-sm text-kca-gray-400">{l.rationale}</p>
               </li>
@@ -361,7 +422,8 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             <div className="space-y-2">
               {a.transpositions.map((t, i) => (
                 <div key={i} className="card border border-kca-border bg-kca-surface p-4">
-                  <Moves moves={t.bypass} />
+                  {/* Older dossiers stored only the short bypass. */}
+                  <LineMoves moves={t.extended ?? t.bypass} outOfBookAtPly={t.outOfBookAtPly} />
                   <p className="mt-1.5 text-sm text-kca-gray-400">{t.note}</p>
                 </div>
               ))}
