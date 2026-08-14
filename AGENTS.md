@@ -1,4 +1,4 @@
-# Kamath Chess Academy (KCA) — Project Context
+npm# Kamath Chess Academy (KCA) — Project Context
 
 Read this file fully before making any changes. It defines the project,
 current state, conventions, and hard rules.
@@ -19,8 +19,9 @@ Solo-built by a student developer, using AI coding agents. This is both a
 real product for a chess academy and a portfolio centerpiece.
 
 **Repo:** `github.com/Xenoni234/Kamath_Chess_Academy-Main`
-**Local path:** `~/Desktop/Phase0` (folder name is historic — it holds the
-whole project, not just Phase 0)
+**Local path:** `~/dev/Phase0` (folder name is historic — it holds the
+whole project, not just Phase 0). Moved off `~/Desktop` deliberately: iCloud
+syncs the Desktop and wrecked this repo (see below) — do not move it back.
 
 ---
 
@@ -125,7 +126,15 @@ lives under `src/lib/second/`:
   download (404, never 403), audit-logged, notification on completion.
 
 **Verified end-to-end** against real accounts: 15 games profiled → 12 Trie
-lines, 8 weaknesses, 3 novelties, PDF + notification, in ~8 s.
+lines, 8 weaknesses, 3 novelties, PDF + notification, in ~8 s. A 94-game run
+produced 7 novelties and a 200 KB dossier PDF.
+
+**Neo4j verified live** (Docker, see Commands): 331 positions / 331 moves
+loaded, and `findTranspositions` returned a correct bypass — their usual
+`e4 e5 Nf3 Nf6 Nc3` versus the `e4 e5 Nc3 Nf6 Nf3` Vienna move-order, both
+reaching the same Four Knights position. Note `transpositions: 0` is a normal
+result on a small sample: the query only reports a bypass when a *weak* position
+is reachable by two or more distinct move-orders in their own games.
 
 ### Phase 5 — Video classes 📋 PLANNED
 Inbuilt group video via mediasoup WebRTC SFU (no third-party API), Socket.io
@@ -213,6 +222,24 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   `LICHESS_API_TOKEN` it returns no novelties rather than guessing. A strong
   opponent's mainlines legitimately yield zero novelties — that is a real
   result, not a bug.
+- **RESOLVED — never put this repo under `~/Desktop` again.** iCloud syncs the
+  Desktop, and with ~48k `node_modules` files plus a constantly-rewritten
+  `.next/`, it caused three separate problems that looked unrelated:
+  1. Conflict copies (`routes.d 2.ts`, `validator 3.ts`, …) in `.next/types/`,
+     making `npx tsc --noEmit` fail with bogus `TS6200 / TS2300 duplicate
+     identifier` errors.
+  2. `bird` + `fileproviderd` + `cloudd` burning ~100 % CPU permanently.
+  3. Endless file-watcher churn → constant Next recompiles → Fast Refresh
+     reloading every open tab → a flood of `GET /login` hits that pinned the
+     dev server.
+
+  Moving to `~/dev/Phase0` fixed all three (measured: hundreds of `/login`
+  hits per second → 3 in 30 s, and recompiles → 0). If conflict copies ever
+  reappear, the cleanup is:
+
+  ```bash
+  find .next \( -name "* [0-9].ts" -o -name "* [0-9].tsx" \) -delete
+  ```
 
 ### Resolved issues (kept for history)
 
@@ -311,13 +338,37 @@ Reusable classes already defined in `globals.css`: `.btn-primary`,
 
 ```bash
 npm run dev          # starts server.mjs — must print "Socket.io server attached"
+npm run worker       # BullMQ worker (reports + opponent profiling); needs QUEUE_REDIS_URL
 npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})
 npx tsc --noEmit     # type check, must pass with zero errors
 npm run build        # production build — the strictest gate
-npm run lint
 npx prisma generate
 npx prisma studio    # browse the database
 ```
+
+`npm run lint` is **broken** — this Next version removed `next lint`, so the
+script resolves a bogus path. Lint with ESLint directly:
+
+```bash
+npx eslint src
+```
+
+**Neo4j (Phase 4 transpositions).** This machine runs Docker via **OrbStack**;
+there is also a colima `judge0-x64` profile belonging to another project —
+leave it alone. Start the graph DB with:
+
+```bash
+open -a OrbStack && docker start kca-neo4j
+```
+
+First-time creation (already done; recreate only if the container is removed):
+
+```bash
+docker run -d --name kca-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/kcadevpassword -v kca-neo4j-data:/data neo4j:5
+```
+
+Browser UI at `http://localhost:7474`. The password above is **local-dev only**;
+the matching `NEO4J_*` vars live in `.env.local` (never committed).
 
 ---
 

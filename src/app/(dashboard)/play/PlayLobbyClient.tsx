@@ -42,7 +42,9 @@ const deriveFormat = (timeControl: string) => {
   return "CLASSICAL";
 };
 
-export default function PlayLobbyClient({ userId, username, allUsers }: PlayLobbyClientProps) {
+// `username` stays on the props type for the caller, but names shown in the
+// lobby are looked up from `allUsers`, so it is not read here.
+export default function PlayLobbyClient({ userId, allUsers }: PlayLobbyClientProps) {
   const router = useRouter();
 
   const [onlineUserIds, setOnlineUserIds] = useState<string[]>([userId]);

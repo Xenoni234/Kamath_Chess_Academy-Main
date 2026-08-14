@@ -56,6 +56,12 @@ const THEMES: { value: string; label: string }[] = [
   { value: "middlegame", label: "Middlegame" },
 ];
 
+/** Standard starting position — used before the first puzzle has loaded. */
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+/** How many times to re-draw when the API hands back an unsolvable line. */
+const MAX_PUZZLE_ATTEMPTS = 5;
+
 function uciToMove(uci: string) {
   return {
     from: uci.slice(0, 2),
@@ -68,7 +74,8 @@ export default function PuzzlesPage() {
   const chessRef = useRef(new Chess());
   const solutionRef = useRef<string[]>([]);
   const idxRef = useRef(0); // index of the next expected move in the solution
-  const startRef = useRef<number>(Date.now());
+  // Set when the player actually gets control of the board, not at render time.
+  const startRef = useRef<number>(0);
   const submittedRef = useRef(false);
   const puzzleRef = useRef<PuzzleData | null>(null);
   const statusRef = useRef<Status>("loading");
@@ -77,7 +84,7 @@ export default function PuzzlesPage() {
   const genRef = useRef(0);
 
   const [puzzle, setPuzzle] = useState<PuzzleData | null>(null);
-  const [fen, setFen] = useState(chessRef.current.fen());
+  const [fen, setFen] = useState(START_FEN);
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [status, setStatusState] = useState<Status>("loading");
   const [lastMove, setLastMove] = useState<string | undefined>();
@@ -134,19 +141,35 @@ export default function PuzzlesPage() {
       const band = DIFFICULTIES[difficultyIdx];
       const params = new URLSearchParams({ minRating: String(band.min), maxRating: String(band.max), limit: "1" });
       if (theme) params.set("theme", theme);
-      const res = await fetch(`/api/puzzles?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.puzzles?.length) {
-        setErrorMsg(data.message ?? "No puzzles available.");
-        setStatus("error");
-        return;
+
+      // Puzzle lines shorter than two plies are not solvable, so skip them.
+      // A bounded retry replaces the previous recursive call, which could spin
+      // forever if a filter only matched unsolvable puzzles.
+      let p: PuzzleData | null = null;
+      let solution: string[] = [];
+      for (let attempt = 0; attempt < MAX_PUZZLE_ATTEMPTS; attempt += 1) {
+        const res = await fetch(`/api/puzzles?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok || !data.success || !data.puzzles?.length) {
+          setErrorMsg(data.message ?? "No puzzles available.");
+          setStatus("error");
+          return;
+        }
+        if (genRef.current !== gen) return; // a newer load superseded this one
+
+        const candidate: PuzzleData = data.puzzles[0];
+        const candidateSolution = candidate.moves.trim().split(/\s+/).filter(Boolean);
+        if (candidateSolution.length >= 2) {
+          p = candidate;
+          solution = candidateSolution;
+          break;
+        }
       }
 
-      const p: PuzzleData = data.puzzles[0];
-      const solution = p.moves.trim().split(/\s+/).filter(Boolean);
-      if (solution.length < 2) {
-        // Not a solvable puzzle line; skip to the next.
-        return loadPuzzle();
+      if (!p) {
+        setErrorMsg("No solvable puzzles available. Try a different filter.");
+        setStatus("error");
+        return;
       }
 
       const chess = new Chess(p.fen);
@@ -185,13 +208,18 @@ export default function PuzzlesPage() {
   }, [difficultyIdx, theme]);
 
   useEffect(() => {
-    void loadPuzzle();
+    async function run() {
+      await loadPuzzle();
+    }
+
+    void run();
   }, [loadPuzzle]);
 
-  // Track the best streak reached this session.
-  useEffect(() => {
-    setBestStreak((b) => Math.max(b, streak));
-  }, [streak]);
+  // Track the best streak reached this session. Adjusting during render rather
+  // than in an effect avoids the extra commit a derived value would cost.
+  if (streak > bestStreak) {
+    setBestStreak(streak);
+  }
 
   // Load the user's all-time solved count once.
   useEffect(() => {

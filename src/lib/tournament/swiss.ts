@@ -33,7 +33,7 @@ export function swissPairings(players: SwissPlayer[]): Pairing[] {
   const pairings: Pairing[] = [];
 
   if (sorted.length % 2 === 1) {
-    let bye = [...sorted].reverse().find((p) => !p.hadBye) ?? sorted[sorted.length - 1];
+    const bye = [...sorted].reverse().find((p) => !p.hadBye) ?? sorted[sorted.length - 1];
     paired.add(bye.userId);
     pairings.push({ byeId: bye.userId });
   }

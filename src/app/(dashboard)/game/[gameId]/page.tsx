@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { TimeFormat } from "@prisma/client";
 import { type GameState } from "@/lib/socket/gameEngine";
 import { getGameFromRedis } from "@/lib/socket/gameEngine";
 import GameRoomClient from "./GameRoomClient";
@@ -28,7 +27,7 @@ export default async function GameRoomPage(context: { params: Promise<{ gameId: 
   const role = payload.role;
 
   // 1. Fetch game from Redis first
-  let activeGame = await getGameFromRedis(gameId);
+  const activeGame = await getGameFromRedis(gameId);
   let isFinished = false;
   let dbGame = null;
 

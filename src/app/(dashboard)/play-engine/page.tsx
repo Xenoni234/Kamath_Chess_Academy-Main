@@ -58,6 +58,7 @@ export default function PlayEnginePage() {
 
   const [fen, setFen] = useState(START_FEN);
   const [moves, setMoves] = useState<string[]>([]);
+  const [pgn, setPgn] = useState("");
   const [isEngineThinking, setIsEngineThinking] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -70,7 +71,10 @@ export default function PlayEnginePage() {
   // Flipping is a view preference only — it never changes the colour you play.
   const playerIsWhite = playerColour === "w";
   const orientation: "white" | "black" = playerIsWhite === !isFlipped ? "white" : "black";
-  const isPlayerTurn = phase === "playing" && chessRef.current.turn() === playerColour;
+  // Side to move is read from `fen` — the render-tracked copy of the position —
+  // rather than the Chess instance, which mutates without React knowing and so
+  // must not be read during render.
+  const isPlayerTurn = phase === "playing" && fen.split(" ")[1] === playerColour;
 
   const syncFromChess = useCallback(() => {
     const chess = chessRef.current;
@@ -78,6 +82,9 @@ export default function PlayEnginePage() {
     setMoves(
       chess.history({ verbose: true }).map((move) => `${move.from}${move.to}${move.promotion ?? ""}`),
     );
+    // Captured here for the same reason: the finished-game panel needs the PGN
+    // as state, not as a render-time read of the mutable instance.
+    setPgn(chess.pgn());
   }, []);
 
   const describeOutcome = useCallback((chess: Chess, colour: "w" | "b"): string | null => {
@@ -234,7 +241,6 @@ export default function PlayEnginePage() {
   );
 
   const lastMoveUci = moves[moves.length - 1];
-  const pgn = useMemo(() => (phase === "over" ? chessRef.current.pgn() : ""), [phase]);
 
   if (phase === "setup") {
     return (

@@ -55,10 +55,9 @@ export async function getParentCards(userId: string): Promise<StatCard[]> {
   // DPDPA: record that a parent accessed their (minor) children's data.
   await writeAuditLog({ action: "PARENT_VIEW_DASHBOARD", userId, metadata: { studentIds } });
 
-  const [upcoming, reports, payments, topRating] = await Promise.all([
+  const [upcoming, reports, topRating] = await Promise.all([
     upcomingClassCount(studentIds),
     studentIds.length ? db.gameReport.count({ where: { userId: { in: studentIds } } }) : Promise.resolve(0),
-    db.payment.count({ where: { userId } }),
     studentIds.length
       ? db.rating.findFirst({ where: { userId: { in: studentIds } }, orderBy: { rating: "desc" }, select: { rating: true } })
       : Promise.resolve(null),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 
 type Theme = "dark" | "light";
@@ -16,6 +16,30 @@ function applyTheme(theme: Theme) {
   }
 }
 
+/**
+ * `<html data-theme>` is the source of truth: the no-flash script sets it before
+ * React boots. Reading it through `useSyncExternalStore` keeps every toggle on
+ * the page (sidebar and navbar render separate instances) showing the same
+ * state, and gives hydration a server snapshot that cannot disagree.
+ */
+function subscribeToTheme(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+  return () => observer.disconnect();
+}
+
+function readTheme(): Theme {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+/** SSR and the hydration render both assume dark, matching the pre-script default. */
+function readServerTheme(): Theme {
+  return "dark";
+}
+
 export default function ThemeToggle({
   variant = "full",
   className = "",
@@ -23,24 +47,14 @@ export default function ThemeToggle({
   variant?: "full" | "icon";
   className?: string;
 }) {
-  const [theme, setTheme] = useState<Theme>("dark");
-  const [mounted, setMounted] = useState(false);
-
-  // Read the theme the no-flash script already applied to <html>.
-  useEffect(() => {
-    const current = document.documentElement.getAttribute("data-theme");
-    setTheme(current === "light" ? "light" : "dark");
-    setMounted(true);
-  }, []);
+  const theme = useSyncExternalStore(subscribeToTheme, readTheme, readServerTheme);
 
   function toggle() {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    applyTheme(next);
+    // Writing the attribute notifies the observer, which re-renders every toggle.
+    applyTheme(theme === "dark" ? "light" : "dark");
   }
 
-  // Until mounted, assume dark so SSR and first client render match.
-  const willSwitchToLight = !mounted || theme === "dark";
+  const willSwitchToLight = theme === "dark";
   const label = willSwitchToLight ? "Switch to light mode" : "Switch to dark mode";
   const Icon = willSwitchToLight ? Sun : Moon;
 

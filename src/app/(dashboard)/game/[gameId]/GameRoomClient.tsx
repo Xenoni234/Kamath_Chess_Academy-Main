@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { Chess } from "chess.js";
 import { getSocket } from "@/lib/socket/client";
 import { cn } from "@/lib/utils";
@@ -42,14 +41,14 @@ export default function GameRoomClient({
   isFinished: initialIsFinished,
   initialPlayers,
 }: GameRoomClientProps) {
-  const router = useRouter();
   const dashboardHref = `/dashboard/${role.toLowerCase()}`;
 
   // Game state
   const [game, setGame] = useState<GameState>(initialActiveGame || initialDbGame!);
   const [fen, setFen] = useState<string>(game.fen);
   const [lastValidFen, setLastValidFen] = useState<string>(game.fen);
-  const [pgn, setPgn] = useState<string>(game.pgn || "");
+  // PGN is pushed to the server on every move but never rendered here.
+  const [, setPgn] = useState<string>(game.pgn || "");
   const [status, setStatus] = useState<string>(game.status);
   const [result, setResult] = useState<string | undefined>(game.result);
   const [terminatedBy, setTerminatedBy] = useState<string | undefined>(game.terminatedBy || game.termination);
@@ -60,7 +59,9 @@ export default function GameRoomClient({
   const [flashRed, setFlashRed] = useState(false);
   const [drawOffer, setDrawOffer] = useState<{ gameId: string; offeredBy: string } | null>(null);
   const [ratingChange, setRatingChange] = useState<number | null>(null);
-  const [fetchingRating, setFetchingRating] = useState(false);
+  // In-flight guard only — never rendered, so a ref avoids a wasted re-render
+  // and keeps the fetch from setting state synchronously inside an effect.
+  const fetchingRatingRef = useRef(false);
 
   const isPlayer = userId === game.white || userId === game.black;
   const isSpectator = !isPlayer;
@@ -91,9 +92,9 @@ export default function GameRoomClient({
   }, []);
 
   // Fetch rating change when game ends (with retries)
-  const fetchRatingChange = async () => {
-    if (fetchingRating) return;
-    setFetchingRating(true);
+  const fetchRatingChange = useCallback(async () => {
+    if (fetchingRatingRef.current) return;
+    fetchingRatingRef.current = true;
 
     const maxRetries = 5;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -101,11 +102,16 @@ export default function GameRoomClient({
         // Increasing delay to let DB write complete
         await new Promise((resolve) => setTimeout(resolve, 800 + attempt * 600));
         const res = await fetch(`/api/games/${gameId}`);
+        // The route answers { success:false, message } on 401/404 — there is no
+        // `game` key to read, and retrying an auth failure never recovers.
+        if (res.status === 401 || res.status === 403) break;
+        if (!res.ok) continue;
+
         const data = await res.json();
-        const record = data.game.records?.find((r: { userId: string; ratingBefore: number; ratingAfter: number }) => r.userId === userId);
+        const record = data.game?.records?.find((r: { userId: string; ratingBefore: number; ratingAfter: number }) => r.userId === userId);
         if (record && record.ratingAfter !== null && record.ratingBefore !== null) {
           setRatingChange(record.ratingAfter - record.ratingBefore);
-          setFetchingRating(false);
+          fetchingRatingRef.current = false;
           return;
         }
       } catch (e) {
@@ -115,15 +121,19 @@ export default function GameRoomClient({
 
     // All retries exhausted — show 0 change rather than stuck on "Calculating..."
     setRatingChange(0);
-    setFetchingRating(false);
-  };
+    fetchingRatingRef.current = false;
+  }, [gameId, userId]);
 
   // Trigger rating fetch if game is already finished on load
   useEffect(() => {
-    if (status === "finished" && game.rated && isPlayer) {
-      void fetchRatingChange();
+    if (status !== "finished" || !game.rated || !isPlayer) return;
+
+    async function run() {
+      await fetchRatingChange();
     }
-  }, [status]);
+
+    void run();
+  }, [status, game.rated, isPlayer, fetchRatingChange]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -205,7 +215,7 @@ export default function GameRoomClient({
       socket.off("game:draw-declined");
       socket.off("game:move-invalid");
     };
-  }, [gameId, isPlayer, userId, lastValidFen]);
+  }, [gameId, isPlayer, userId, lastValidFen, fetchRatingChange]);
 
   const handleMove = (from: string, to: string, promotion?: string) => {
     if (!isOngoing || isSpectator) return;

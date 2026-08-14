@@ -67,7 +67,18 @@ export default function ReportsPage() {
   }, []);
 
   useEffect(() => {
-    void loadReports().finally(() => setIsLoading(false));
+    // `cancelled` stops the initial load from clearing the spinner after unmount.
+    let cancelled = false;
+
+    async function initialLoad() {
+      await loadReports();
+      if (!cancelled) setIsLoading(false);
+    }
+
+    void initialLoad();
+    return () => {
+      cancelled = true;
+    };
   }, [loadReports]);
 
   const stopPolling = useCallback(() => {

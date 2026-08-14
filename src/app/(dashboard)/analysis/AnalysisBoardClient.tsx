@@ -131,15 +131,29 @@ export default function AnalysisBoardClient() {
   }, [gameId, applyLoaded]);
 
   // ---- Entry point: a PGN handed over in the URL --------------------------
+  // Parsing is pure, so it is derived during render. Only loading the result
+  // into the board is a side effect, and a parse failure is derived state
+  // rather than something to store.
+  const parsedPgn = useMemo(() => (pgnParam ? buildLineFromPgn(pgnParam) : null), [pgnParam]);
+  const pgnError = pgnParam && !parsedPgn ? "That PGN could not be read." : null;
+
+  // Loading the parsed line is a state adjustment, so it happens during render
+  // — no extra commit, and the board never shows a frame of the old position.
+  // Resetting the engine is the one genuine side effect and stays in an effect.
+  const [appliedPgn, setAppliedPgn] = useState<string | null>(null);
+  if (parsedPgn && pgnParam !== appliedPgn) {
+    setAppliedPgn(pgnParam);
+    setRootFen(parsedPgn.rootFen);
+    setNodes(parsedPgn.nodes);
+    setCurrentPly(parsedPgn.nodes.length);
+    setSourceLabel("Engine game");
+    setAnalyses([]);
+    setLoadError(null);
+  }
+
   useEffect(() => {
-    if (!pgnParam) return;
-    const parsed = buildLineFromPgn(pgnParam);
-    if (!parsed) {
-      setLoadError("That PGN could not be read.");
-      return;
-    }
-    applyLoaded({ rootFen: parsed.rootFen, nodes: parsed.nodes, label: "Engine game" });
-  }, [pgnParam, applyLoaded]);
+    if (appliedPgn) newGame();
+  }, [appliedPgn, newGame]);
 
   // ---- Live evaluation of the position on the board -----------------------
   useEffect(() => {
@@ -374,9 +388,9 @@ export default function AnalysisBoardClient() {
         </p>
       </div>
 
-      {loadError && (
+      {(loadError ?? pgnError) && (
         <div className="mb-4 rounded-xl border border-kca-danger/30 bg-kca-danger/10 px-4 py-3 text-sm text-kca-danger">
-          {loadError}
+          {loadError ?? pgnError}
         </div>
       )}
 
@@ -568,8 +582,9 @@ export default function AnalysisBoardClient() {
           )}
 
           <ExplainPanel
+            // Remounting on position change is what clears the previous explanation.
+            key={`${currentFen}:${currentPly}`}
             buildParams={buildExplainParams}
-            resetKey={`${currentFen}:${currentPly}`}
             disabled={!isReady || !currentNode || isScanning}
           />
 

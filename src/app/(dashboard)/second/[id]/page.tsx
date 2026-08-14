@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, Loader2, Target, Sparkles, Shuffle, BookOpen } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Target, Sparkles, Shuffle, BookOpen, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Weakness = {
@@ -51,9 +51,34 @@ const TAG_STYLES: Record<string, string> = {
   mainline: "bg-kca-gray-600/20 text-kca-gray-100 border-kca-gray-600/30",
 };
 
+/** Numbered PGN movetext — what the analysis board's ?pgn= loader expects. */
+function toPgn(moves: string[]): string {
+  let out = "";
+  for (let i = 0; i < moves.length; i += 1) {
+    if (i % 2 === 0) out += `${i / 2 + 1}. `;
+    out += `${moves[i]} `;
+  }
+  return out.trim();
+}
+
+/**
+ * A move-order, clickable through to the analysis board so the line can be
+ * played out with the engine rather than just read as text.
+ */
 function Moves({ moves }: { moves: string[] }) {
   if (moves.length === 0) return <span className="text-kca-gray-500">(starting position)</span>;
-  return <span className="font-mono text-sm text-kca-white">{moves.join(" ")}</span>;
+  return (
+    <Link
+      href={`/dashboard/analysis?pgn=${encodeURIComponent(toPgn(moves))}`}
+      title="Open this line on the analysis board"
+      className="group inline-flex items-center gap-1.5 font-mono text-sm text-kca-white hover:text-kca-cyan transition-colors"
+    >
+      <span className="underline decoration-dotted decoration-kca-gray-600 underline-offset-4 group-hover:decoration-kca-cyan">
+        {moves.join(" ")}
+      </span>
+      <Play className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+    </Link>
+  );
 }
 
 function Section({
@@ -160,6 +185,9 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
       {profile.repertoire && profile.repertoire.lines.length > 0 && (
         <Section title="Recommended repertoire" icon={Target}>
+          <p className="mb-3 -mt-1 text-xs text-kca-gray-500">
+            Click any move-order to open it on the analysis board and play through it with the engine.
+          </p>
           <ol className="space-y-3">
             {profile.repertoire.lines.map((l, i) => (
               <li key={i} className="card border border-kca-border bg-kca-surface p-4">
@@ -200,7 +228,8 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
               <div key={i} className="card border border-kca-border bg-kca-surface p-4">
                 <div className="flex items-baseline gap-2">
                   <span className="font-mono text-base font-semibold text-kca-cyan">{n.move}</span>
-                  <Moves moves={n.line} />
+                  {/* Include the novelty itself so the board opens on the move, not before it. */}
+                  <Moves moves={[...n.line, n.move]} />
                 </div>
                 <p className="mt-1.5 text-sm text-kca-gray-400">
                   Engine {n.evalCp ?? 0}cp · played in{" "}
