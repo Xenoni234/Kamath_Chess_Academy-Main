@@ -68,6 +68,13 @@ export type TranspositionLine = {
   /** The opponent's most-frequent move-order to the same FEN (their "prep"). */
   mainLine: string[];
   note: string;
+  /**
+   * `bypass` played out to a usable depth — their own book while it lasts, then
+   * Stockfish. Absent on dossiers generated before extension existed.
+   */
+  extended?: string[];
+  /** Ply within `extended` where the opponent leaves their book. */
+  outOfBookAtPly?: number;
 };
 
 /** An engine-strong, human-rare move at a target position. */
@@ -90,6 +97,15 @@ export type RepertoireLine = {
   /** Why this line targets the opponent (weakness/novelty/transposition it exploits). */
   rationale: string;
   tag: "weakness" | "novelty" | "transposition" | "mainline";
+  /**
+   * Ply at which the opponent leaves their own book — after this point their
+   * moves are the engine's guess, not something they have actually played.
+   * Undefined when they stayed in book for the whole line, or when the line was
+   * never extended.
+   */
+  outOfBookAtPly?: number;
+  /** Engine evaluation at the end of the extended line, centipawns from White. */
+  evalCp?: number | null;
 };
 
 /** The full profiling result persisted on OpponentProfile.artifact. */

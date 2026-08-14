@@ -90,8 +90,17 @@ export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLin
     .map((t) => `- ${t.bypass.join(" ")} (instead of their usual ${t.mainLine.join(" ")})`)
     .join("\n");
 
+  // The out-of-book ply matters to the narrative: up to it these are moves the
+  // opponent has actually played, after it they are the engine's continuation.
+  // Without the distinction the AI describes engine guesses as their habits.
   const recommended = lines
-    .map((l, i) => `${i + 1}. [${l.tag}] ${l.moves.join(" ")} — ${l.rationale}`)
+    .map((l, i) => {
+      const book =
+        l.outOfBookAtPly === undefined
+          ? ""
+          : ` [in their own book to move ${Math.floor(l.outOfBookAtPly / 2) + 1}; the remainder is engine continuation]`;
+      return `${i + 1}. [${l.tag}] ${l.moves.join(" ")}${book} — ${l.rationale}`;
+    })
     .join("\n");
 
   return `Opponent: ${artifact.handle} (${artifact.source})
