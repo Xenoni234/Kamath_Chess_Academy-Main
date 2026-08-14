@@ -52,7 +52,13 @@ export function renderDossierHtml(
       )
       .join("") ||
     `<tr><td colspan="2">${
-      artifact.graphUsed ? "No transpositions found." : "Transposition analysis unavailable (graph database not configured)."
+      artifact.graphUsed
+        ? "No transpositions found."
+        : artifact.graphSkipReason === "not-configured"
+          ? "Transposition analysis did not run (graph database not configured)."
+          : artifact.graphSkipReason === "failed"
+            ? "Transposition analysis failed while this dossier was generated."
+            : "Transposition analysis unavailable for this dossier."
     }</td></tr>`;
 
   const lineItems =

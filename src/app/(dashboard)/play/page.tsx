@@ -19,7 +19,13 @@ export default async function PlayLobbyPage() {
     redirect("/login");
   }
 
+  // The lobby only needs names/ratings to label open challenges, so this was an
+  // unbounded read of every user and every rating row, serialised into the RSC
+  // payload on each visit. Bounded to active accounts and a sane page size.
   const allUsers = await db.user.findMany({
+    where: { isActive: true },
+    orderBy: { username: "asc" },
+    take: 500,
     select: {
       id: true,
       username: true,

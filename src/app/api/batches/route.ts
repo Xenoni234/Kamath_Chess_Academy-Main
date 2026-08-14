@@ -32,10 +32,13 @@ export async function GET(request: NextRequest) {
     const batches = await db.batch.findMany({
       where: isManager ? {} : { coach: { userId: payload.userId } },
       include: {
-        coach: { include: { user: { select: { id: true, username: true } } } },
+        // `select` on the coach: only the nested user id/username is rendered,
+        // so `include` was pulling every CoachProfile column alongside it.
+        coach: { select: { user: { select: { id: true, username: true } } } },
         _count: { select: { classes: true, enrollments: true } },
       },
       orderBy: { createdAt: "desc" },
+      take: 200,
     });
 
     return NextResponse.json({

@@ -106,7 +106,16 @@ export type ProfileArtifact = {
   novelties: Novelty[];
   /** True when Neo4j was available and the transposition pass ran. */
   graphUsed: boolean;
+  /**
+   * Why the pass did not run, when `graphUsed` is false. Absent on dossiers
+   * generated before this was recorded — treat that as "unknown" rather than
+   * assuming a cause.
+   */
+  graphSkipReason?: GraphSkipReason;
 };
+
+/** `not-configured` = no NEO4J_* env vars; `failed` = the stage threw. */
+export type GraphSkipReason = "not-configured" | "failed";
 
 /** BullMQ payload for a profiling run. */
 export type ProfileJobData = {

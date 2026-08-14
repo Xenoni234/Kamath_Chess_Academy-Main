@@ -17,3 +17,23 @@ export async function createNotification(params: {
   getIo()?.to(`user:${params.userId}`).emit("notification:new", notification);
   return notification;
 }
+
+/**
+ * Same contract as `createNotification` but for a whole cohort, in ONE insert.
+ * Fanning out to a class of students previously issued one round trip each,
+ * which is expensive when the database is a region away. Returns the created
+ * rows so each recipient still gets its live socket push.
+ */
+export async function createNotifications(
+  entries: { userId: string; type: NotificationType; title: string; body: string }[],
+) {
+  if (entries.length === 0) return [];
+  const notifications = await db.notification.createManyAndReturn({ data: entries });
+  const io = getIo();
+  if (io) {
+    for (const notification of notifications) {
+      io.to(`user:${notification.userId}`).emit("notification:new", notification);
+    }
+  }
+  return notifications;
+}

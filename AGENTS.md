@@ -116,6 +116,16 @@ lives under `src/lib/second/`:
   on a 4-field FEN key (no move counters) so move-orders collapse into a DAG;
   Cypher then finds bypass move-orders to weak targets. Opt-in: without
   `NEO4J_*` the stage is skipped and the rest of the dossier still generates.
+  The load runs in **one transaction** — the `DETACH DELETE` used to commit on
+  its own, so a failure mid-load left the profile with zero positions, which
+  looks identical to "never ran".
+- ✅ **Dossiers are regenerable** — `POST /api/second/profiles/[id]/regenerate`
+  plus a button on the dossier page. The artifact (including `graphUsed`) is a
+  snapshot frozen at job time and nothing else recomputes it, so a dossier built
+  while an optional stage was down would otherwise report that state forever.
+  When the graph stage is skipped, `graphSkipReason` records **why**
+  (`not-configured` vs `failed`) so the UI stops blaming configuration for
+  every failure.
 - ✅ **Novelty mining** (`novelty.ts`) — engine MultiPV ∩ rare in the Lichess
   Explorer = sound moves humans rarely play.
 - ✅ **Repertoire + PDF** (`repertoire.ts`, `pdf.ts`, `claude.ts`) — lines are
@@ -202,9 +212,26 @@ Phase 2 is feature-complete. **Done and verified this phase:**
 
 **Known gaps / follow-ups:**
 
-- `ANTHROPIC_API_KEY` and `LICHESS_API_TOKEN` must be set in `.env.local`;
-  both are in `.env.example`. Claude's client is lazily constructed, so a
-  missing key fails the request rather than the import.
+- **The database is in Tokyo (`ap-northeast-1`) and the users are in India** —
+  measured ~150 ms per round trip. That is the floor under every page. Moving to
+  `ap-south-1` takes it to ~20-30 ms; `scripts/migrate-region.sh` does the
+  dump/restore and verifies row counts, but you must create the Supabase project
+  and hand it the new **direct** (5432, not pooled 6543) URL. The whole DB is
+  157 MB, 145 MB of which is the 495k-row `Puzzle` table, so a plain
+  `pg_dump`/`pg_restore` is fine — no need to re-import from CSV. Needs
+  `brew install libpq` for pg_dump 17.
+- **Connection pooling is load-bearing** — `src/lib/db.ts` sets
+  `idleTimeoutMillis` to 5 minutes. `pg-pool` defaults to 10 s, and
+  NotificationBell polls every 30 s, so with the default *every* poll and every
+  human-paced navigation found a dead pool and paid a fresh TCP+TLS+SCRAM
+  handshake. Measured: 682 ms → 142 ms on a query after a 15 s idle gap. Do not
+  drop those pool options. The pool is memoised on `globalThis` alongside the
+  client so HMR does not orphan pools.
+- `ANTHROPIC_API_KEY` is **optional** — `AI_PROVIDER` (`anthropic` | `ollama` |
+  `template`) selects the backend and defaults away from Anthropic.
+  `LICHESS_API_TOKEN` must still be set in `.env.local`; both are in
+  `.env.example`. Claude's client is lazily constructed, so a missing key fails
+  the request rather than the import.
 - Report PDFs are written to `/tmp` and served by
   `/api/reports/[reportId]/download`; that path is ephemeral and per-instance,
   so the emailed attachment is the durable copy.
@@ -344,6 +371,17 @@ npx tsc --noEmit     # type check, must pass with zero errors
 npm run build        # production build — the strictest gate
 npx prisma generate
 npx prisma studio    # browse the database
+npx prisma db push   # apply schema changes — see the warning below
+```
+
+**Never run `prisma migrate dev` on this project.** There is no
+`prisma/migrations` directory and the database is not managed by Prisma Migrate,
+so `migrate dev` tries to baseline and may offer to **reset the database**.
+Schema changes ship with `npx prisma db push`. Always check what it intends to
+do first — an empty diff means the DB already matches:
+
+```bash
+npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
 ```
 
 `npm run lint` is **broken** — this Next version removed `next lint`, so the

@@ -14,9 +14,30 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     const payload = verifyAccessToken(token);
     const { id } = await context.params;
 
+    // Explicit select: `updatedAt` and the repertoire's `profileId`/`createdAt`
+    // are never rendered, and `linesJson` is large enough that pulling whole
+    // rows across a cross-region link is worth avoiding.
     const profile = await db.opponentProfile.findUnique({
       where: { id },
-      include: { repertoires: { orderBy: { createdAt: "desc" }, take: 1 } },
+      select: {
+        id: true,
+        requestedById: true,
+        handle: true,
+        source: true,
+        colorToPlay: true,
+        fideId: true,
+        status: true,
+        gamesAnalyzed: true,
+        ratingSummary: true,
+        artifact: true,
+        summary: true,
+        createdAt: true,
+        repertoires: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { id: true, summary: true, linesJson: true, pdfUrl: true },
+        },
+      },
     });
 
     // "Not yours" and "not found" answer identically so the route cannot be

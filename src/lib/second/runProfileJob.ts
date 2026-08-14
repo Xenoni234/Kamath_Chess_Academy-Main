@@ -70,7 +70,11 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
     const weaknesses = await detectWeaknesses(games, theirColor);
 
     // 4. Transpositions (Neo4j; skipped when not configured).
-    const { transpositions, graphUsed } = await runGraphStage(profileId, trie, weaknesses);
+    const { transpositions, graphUsed, graphSkipReason } = await runGraphStage(
+      profileId,
+      trie,
+      weaknesses,
+    );
 
     // 5. Novelties at OUR decision points inside their repertoire: the position
     // right after one of their moves is one where we are to move.
@@ -110,6 +114,7 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
       transpositions,
       novelties,
       graphUsed,
+      graphSkipReason,
     };
 
     const lines = buildRepertoireLines(artifact);

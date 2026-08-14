@@ -226,8 +226,11 @@ model Game {
   blackUser   User?              @relation("BlackGames", fields: [blackUserId], references: [id], onDelete: SetNull)
   records     GameResultRecord[]
 
-  @@index([whiteUserId])
-  @@index([blackUserId])
+  // "My games" filters `OR: [whiteUserId, blackUserId]` and sorts playedAt desc.
+  // The single-column indexes served the filter but left the sort to an external
+  // sort; these composites cover both halves of the OR.
+  @@index([whiteUserId, playedAt])
+  @@index([blackUserId, playedAt])
   @@index([timeFormat, playedAt])
 }
 
@@ -260,6 +263,9 @@ model GameReport {
   updatedAt     DateTime @updatedAt
   user          User     @relation(fields: [userId], references: [id])
 
+  // /api/reports filters userId and sorts createdAt desc. This model had no
+  // index at all, so every request sequentially scanned and then sorted.
+  @@index([userId, createdAt])
   @@map("game_reports")
 }
 

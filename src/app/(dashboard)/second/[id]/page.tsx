@@ -1,9 +1,40 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, Loader2, Target, Sparkles, Shuffle, BookOpen, Play } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Download,
+  Loader2,
+  Play,
+  RefreshCw,
+  Shuffle,
+  Sparkles,
+  Target,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const POLL_INTERVAL_MS = 4000;
+/** Profiling runs engine analysis over many positions; allow a long window. */
+const POLL_TIMEOUT_MS = 20 * 60 * 1000;
+
+/**
+ * `graphUsed: false` means the transposition pass did not run, but it does not
+ * say why — and the old copy always blamed configuration, which sent you off
+ * checking env vars even when Neo4j was healthy and the stage had simply
+ * thrown. Dossiers generated before `graphSkipReason` existed carry no reason
+ * at all, so that case says so instead of guessing.
+ */
+function graphSkipMessage(reason: Artifact["graphSkipReason"]): string {
+  if (reason === "not-configured") {
+    return "Transposition analysis did not run — the graph database was not configured when this dossier was generated. Regenerate to retry.";
+  }
+  if (reason === "failed") {
+    return "Transposition analysis failed while this dossier was generated. Check the server log for “[second] Neo4j transposition stage failed”, then regenerate.";
+  }
+  return "Transposition analysis is unavailable for this dossier. Regenerate to retry with the current setup.";
+}
 
 type Weakness = {
   line: string[];
@@ -28,6 +59,8 @@ type Artifact = {
   transpositions: Transposition[];
   novelties: Novelty[];
   graphUsed: boolean;
+  /** Absent on dossiers generated before the reason was recorded. */
+  graphSkipReason?: "not-configured" | "failed";
 };
 
 type Profile = {
@@ -105,17 +138,75 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartedAtRef = useRef(0);
+
+  const load = useCallback(async (): Promise<Profile | null> => {
+    try {
+      const res = await fetch(`/api/second/profiles/${id}`);
+      const data = await res.json();
+      if (!data.success) {
+        setError(data.message ?? "Could not load this dossier.");
+        return null;
+      }
+      setProfile(data.profile);
+      return data.profile as Profile;
+    } catch {
+      setError("Could not load this dossier.");
+      return null;
+    }
+  }, [id]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // Same shape as the dossier list page: poll while a run is in flight, and give
+  // up after the timeout so a stuck job cannot poll forever.
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current) return;
+    pollStartedAtRef.current = Date.now();
+    pollTimerRef.current = setInterval(async () => {
+      const latest = await load();
+      const running = latest?.status === "pending" || latest?.status === "processing";
+      if (!running || Date.now() - pollStartedAtRef.current > POLL_TIMEOUT_MS) {
+        stopPolling();
+      }
+    }, POLL_INTERVAL_MS);
+  }, [load, stopPolling]);
 
   useEffect(() => {
-    fetch(`/api/second/profiles/${id}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) setProfile(data.profile);
-        else setError(data.message ?? "Could not load this dossier.");
-      })
-      .catch(() => setError("Could not load this dossier."))
-      .finally(() => setLoading(false));
-  }, [id]);
+    async function initialLoad() {
+      const latest = await load();
+      setLoading(false);
+      if (latest?.status === "pending" || latest?.status === "processing") startPolling();
+    }
+
+    void initialLoad();
+    return stopPolling;
+  }, [load, startPolling, stopPolling]);
+
+  const isBusy = profile?.status === "pending" || profile?.status === "processing";
+
+  const regenerate = useCallback(async () => {
+    setRegenError(null);
+    try {
+      const res = await fetch(`/api/second/profiles/${id}/regenerate`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setRegenError(data.message ?? "Could not start the regeneration.");
+        return;
+      }
+      await load();
+      startPolling();
+    } catch {
+      setRegenError("Could not start the regeneration.");
+    }
+  }, [id, load, startPolling]);
 
   if (loading) {
     return (
@@ -158,12 +249,30 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             {profile.fideId && ` · FIDE ${profile.fideId}`}
           </p>
         </div>
-        {profile.repertoire?.hasPdf && (
-          <a href={`/api/second/profiles/${profile.id}/download`} className="btn-secondary shrink-0 py-2 px-4">
-            <Download className="h-4 w-4" /> PDF
-          </a>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={regenerate}
+            disabled={isBusy}
+            className="btn-secondary py-2 px-4 disabled:opacity-50"
+            title="Re-run the analysis against this opponent with the current server setup"
+          >
+            <RefreshCw className={cn("h-4 w-4", isBusy && "animate-spin")} />
+            {isBusy ? "Regenerating…" : "Regenerate"}
+          </button>
+          {profile.repertoire?.hasPdf && (
+            <a href={`/api/second/profiles/${profile.id}/download`} className="btn-secondary py-2 px-4">
+              <Download className="h-4 w-4" /> PDF
+            </a>
+          )}
+        </div>
       </div>
+
+      {regenError && (
+        <div className="mb-4 rounded-xl border border-kca-danger/30 bg-kca-danger/10 px-4 py-3 text-sm text-kca-danger">
+          {regenError}
+        </div>
+      )}
 
       {profile.status !== "complete" && (
         <div className="card mb-6 border border-kca-border bg-kca-surface p-5 text-kca-gray-300">
@@ -246,7 +355,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
         <Section title="Transposition bypasses" icon={Shuffle}>
           {a.transpositions.length === 0 ? (
             <div className="card border border-kca-border bg-kca-surface p-4 text-sm text-kca-gray-400">
-              Transposition analysis is unavailable — the graph database is not configured.
+              {graphSkipMessage(a.graphSkipReason)}
             </div>
           ) : (
             <div className="space-y-2">

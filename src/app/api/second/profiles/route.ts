@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
-import { enqueueProfile } from "@/lib/queue/queues";
 import { createProfileSchema } from "@/lib/validations/phase4";
+
+// `enqueueProfile` is deliberately NOT imported at module scope. It reaches
+// runProfileJob and runReportJob, which pull in puppeteer, neo4j-driver, the
+// Anthropic SDK and resend — several seconds of module loading. GET on this
+// route is a single findMany and has no business paying for that, so the import
+// happens inside POST, which actually needs it.
 
 export const runtime = "nodejs";
 
@@ -89,6 +94,7 @@ export async function POST(request: NextRequest) {
     request,
   });
 
+  const { enqueueProfile } = await import("@/lib/queue/queues");
   await enqueueProfile({
     profileId: profile.id,
     requestedById: payload.userId,
