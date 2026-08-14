@@ -212,6 +212,32 @@ Phase 2 is feature-complete. **Done and verified this phase:**
 
 **Known gaps / follow-ups:**
 
+- **Two engine landmines in `src/lib/engine/serverEngine.ts`. Do not undo either.**
+  1. **Never resolve a search without waiting for `bestmove`.** On timeout the
+     code sends `stop` and then keeps its listener until the `bestmove` that
+     `stop` produces actually lands (`STOP_GRACE_MS`). Resolving immediately —
+     as it used to — leaves that message for the *next* search's listener, which
+     then resolves the wrong position in ~2 ms, permanently desyncing the batch.
+     It cost 300 s of budget for 2.6 s of work (`budget exhausted after 34/60`)
+     **and** produced wrong weakness accuracies. Measured after the fix: 60/60
+     positions at depth 12 in 3.5 s, 59 ms each.
+  2. **Restore `globalThis.fetch` from `PRISTINE_FETCH`, not a per-boot save.**
+     The Emscripten runtime clobbers `fetch` while booting. With a pool of
+     engines booting concurrently, a per-boot save captures the already-clobbered
+     value and faithfully restores the broken one — everything afterwards dies
+     with `fetch is not a function`. Boots are also serialised through
+     `bootQueue` for the same reason.
+- **Engine threads are 1 on purpose, everywhere.** Measured on an M4: at fixed
+  depth, more threads per engine is *slower* (depth 20: 1311 ms at threads=1 vs
+  1762 ms at threads=4) because SMP widens the search. Throughput comes from
+  `mapWithEngines` running `ENGINE_CONCURRENCY` single-threaded engines in
+  parallel. Do not "optimise" this by raising `threads`.
+- **Dossier timings after the above** (Rambo1998, 94 games, deep settings):
+  ingest 2.4 s · weakness+novelty 3.6 s · Neo4j 7.8 s · extend 12.5 s ·
+  **AI narrative 102 s** · PDF 2.7 s = **~132 s total**, down from ~20 minutes.
+  All Stockfish work is now ~26 s; the local Ollama narrative is the bottleneck.
+  Per-stage times are logged as `[second] <stage>: Ns` — check those first before
+  optimising anything here.
 - **The database is in Tokyo (`ap-northeast-1`) and the users are in India** —
   measured ~150 ms per round trip. That is the floor under every page. Moving to
   `ap-south-1` takes it to ~20-30 ms; `scripts/migrate-region.sh` does the
