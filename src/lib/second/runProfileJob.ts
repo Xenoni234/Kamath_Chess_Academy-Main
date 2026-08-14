@@ -9,6 +9,7 @@ import { detectWeaknesses } from "@/lib/second/weakness";
 import { runGraphStage } from "@/lib/second/graph";
 import { mineNovelties, type NoveltyTarget } from "@/lib/second/novelty";
 import { buildRepertoireLines, describeArtifact } from "@/lib/second/repertoire";
+import { extendAll } from "@/lib/second/extend";
 import { renderDossierPdf } from "@/lib/second/pdf";
 import type { ProfileArtifact, ProfileJobData } from "@/lib/second/types";
 
@@ -28,8 +29,60 @@ const MAX_GAMES = 200;
 /** Cap the positions handed to the (expensive) novelty miner. */
 const MAX_NOVELTY_TARGETS = 8;
 
+/**
+ * Ceiling on a whole profiling run.
+ *
+ * Generous: engine stages alone can legitimately take ~20 minutes on the deep
+ * settings. The point is not to be tight, it is that *some* bound exists — a
+ * stage that hangs (a stalled AI response, a wedged engine) previously left the
+ * row on "processing" forever with nothing able to move it, and no error.
+ */
+const JOB_TIMEOUT_MS = 30 * 60 * 1000;
+
 export async function runProfileJob(data: ProfileJobData): Promise<void> {
+  try {
+    await Promise.race([
+      runProfileJobInner(data),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`profiling job exceeded ${JOB_TIMEOUT_MS}ms`)),
+          JOB_TIMEOUT_MS,
+        ).unref?.(),
+      ),
+    ]);
+  } catch (error) {
+    // `runProfileJobInner` marks its own failures; this catches the case where
+    // it never returns at all, so the row does not stay "processing" forever.
+    console.error("[second] profiling job aborted:", error);
+    await db.opponentProfile
+      .update({ where: { id: data.profileId }, data: { status: "failed" } })
+      .catch(() => {});
+  }
+}
+
+/**
+ * Per-stage timing. This pipeline has many expensive stages and no visibility
+ * into which one is slow — the last regression cost a 20-minute run and was
+ * only found by bisecting by hand.
+ */
+function stageTimer() {
+  const started = Date.now();
+  let last = started;
+  return {
+    mark(stage: string) {
+      const now = Date.now();
+      console.log(`[second] ${stage}: ${((now - last) / 1000).toFixed(1)}s`);
+      last = now;
+    },
+    total() {
+      return ((Date.now() - started) / 1000).toFixed(1);
+    },
+  };
+}
+
+async function runProfileJobInner(data: ProfileJobData): Promise<void> {
   const { profileId, requestedById, handle, source, colorToPlay } = data;
+  const timer = stageTimer();
 
   try {
     await db.opponentProfile.update({ where: { id: profileId }, data: { status: "processing" } });
@@ -63,21 +116,13 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
     }
 
     // 2. Repertoire Trie.
+    timer.mark("ingest");
     const trie = buildTrie(games, theirColor);
     const trieSummary = trieSummaryLines(trie);
 
-    // 3. Weaknesses (engine-graded).
-    const weaknesses = await detectWeaknesses(games, theirColor);
-
-    // 4. Transpositions (Neo4j; skipped when not configured).
-    const { transpositions, graphUsed, graphSkipReason } = await runGraphStage(
-      profileId,
-      trie,
-      weaknesses,
-    );
-
-    // 5. Novelties at OUR decision points inside their repertoire: the position
-    // right after one of their moves is one where we are to move.
+    // 3. Novelty targets — OUR decision points inside their repertoire: the
+    // position right after one of their moves is one where we are to move.
+    // Derived from the trie alone, so this needs nothing from the weakness pass.
     const targets: NoveltyTarget[] = [];
     const seenFens = new Set<string>();
     const pathByFen = new Map<string, string[]>();
@@ -100,7 +145,25 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
       if (targets.length >= MAX_NOVELTY_TARGETS) break;
     }
 
-    const novelties = await mineNovelties(targets);
+    // 4. Weaknesses and novelties are fully independent of each other — one
+    // reads the games, the other the trie — so they run concurrently instead of
+    // back to back. Each uses its own engine.
+    const [weaknesses, novelties] = await Promise.all([
+      detectWeaknesses(games, theirColor),
+      mineNovelties(targets),
+    ]);
+
+    timer.mark("weakness+novelty");
+
+    // 5. Transpositions (Neo4j; skipped when not configured). This genuinely
+    // needs the weaknesses, so it cannot join the pair above.
+    const { transpositions, graphUsed, graphSkipReason } = await runGraphStage(
+      profileId,
+      trie,
+      weaknesses,
+    );
+
+    timer.mark("neo4j transpositions");
 
     // 6. Assemble the artifact and the recommended lines.
     const artifact: ProfileArtifact = {
@@ -117,7 +180,31 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
       graphSkipReason,
     };
 
-    const lines = buildRepertoireLines(artifact);
+    // 6b. Extend the recommended lines AND the transposition bypasses into real
+    // variations. The stages above only produce the path *to* a point of
+    // interest; this plays it out using the opponent's own book while it lasts,
+    // then Stockfish.
+    //
+    // One call, because `buildRepertoireLines` already folds the first few
+    // bypasses into the lines — extending them separately did that work twice.
+    // Failure returns the short lines unchanged rather than losing the dossier.
+    const shortLines = buildRepertoireLines(artifact);
+    const extended = await extendAll(
+      shortLines,
+      artifact.transpositions.map((t) => t.bypass),
+      trie,
+      theirColor,
+    );
+    const lines = extended.lines;
+
+    artifact.transpositions = artifact.transpositions.map((t, i) => ({
+      ...t,
+      extended: extended.moveOrders[i]?.moves,
+      outOfBookAtPly: extended.moveOrders[i]?.outOfBookAtPly,
+    }));
+
+    timer.mark("extend lines");
+
     const description = describeArtifact(artifact, lines);
     const topWeakness = weaknesses[0]
       ? {
@@ -140,6 +227,8 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
       transpositionCount: transpositions.length,
     });
 
+    timer.mark("AI narrative");
+
     // 8. PDF. A rendering failure must not lose the dossier itself.
     let pdfPath: string | null = null;
     try {
@@ -150,6 +239,8 @@ export async function runProfileJob(data: ProfileJobData): Promise<void> {
       console.error("[second] dossier PDF failed:", error);
       pdfPath = null;
     }
+
+    timer.mark("PDF");
 
     // 9. Persist.
     await db.repertoirePlan.create({
