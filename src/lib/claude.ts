@@ -151,10 +151,20 @@ function textFromMessage(message: Anthropic.Messages.Message) {
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
 
+/**
+ * A local model writing a long dossier narrative can legitimately take minutes,
+ * but it must not be able to take forever. `fetch` has no default timeout, so a
+ * stalled Ollama left the profiling job awaiting a response that never arrived:
+ * zero CPU, no error thrown, and the OpponentProfile row stuck on "processing"
+ * with nothing able to move it.
+ */
+const OLLAMA_TIMEOUT_MS = 5 * 60 * 1000;
+
 async function ollamaChat(system: string, prompt: string, maxTokens: number): Promise<string> {
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       stream: false,
@@ -178,6 +188,7 @@ async function* ollamaChatStream(system: string, prompt: string, maxTokens: numb
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       stream: true,
