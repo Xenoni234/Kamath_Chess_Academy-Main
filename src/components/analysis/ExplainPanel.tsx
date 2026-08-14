@@ -15,13 +15,24 @@ type ExplainPanelProps = {
    * e.g. at the root position, or before the engine has produced any lines.
    */
   buildParams: () => Promise<ExplainParams | null>;
+  /**
+   * Fires true while an explanation is in flight and false when it settles.
+   * The analysis board uses it to pause its infinite engine search: the AI
+   * provider may be a local model on the same machine, and a full-strength
+   * search alongside it measurably slows generation.
+   */
+  onStreamingChange?: (streaming: boolean) => void;
   disabled?: boolean;
 };
 
 // The caller passes a `key` derived from the position, so moving to a different
 // move remounts this panel: state resets and the unmount cleanup below abandons
 // any in-flight explanation. That replaces the old `resetKey` sync effect.
-export default function ExplainPanel({ buildParams, disabled }: ExplainPanelProps) {
+export default function ExplainPanel({
+  buildParams,
+  onStreamingChange,
+  disabled,
+}: ExplainPanelProps) {
   const [text, setText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +48,9 @@ export default function ExplainPanel({ buildParams, disabled }: ExplainPanelProp
     setText("");
     setError(null);
     setIsStreaming(true);
+    // Announced before `buildParams` runs: that does its own engine search, and
+    // the board should already have released the infinite one by then.
+    onStreamingChange?.(true);
 
     try {
       const params = await buildParams();
@@ -87,6 +101,7 @@ export default function ExplainPanel({ buildParams, disabled }: ExplainPanelProp
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setIsStreaming(false);
+      onStreamingChange?.(false);
     }
   };
 

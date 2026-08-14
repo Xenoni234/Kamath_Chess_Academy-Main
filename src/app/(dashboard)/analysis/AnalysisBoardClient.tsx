@@ -64,6 +64,8 @@ export default function AnalysisBoardClient() {
 
   const [analyses, setAnalyses] = useState<MoveAnalysis[]>([]);
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
+  /** True while the coach explanation is streaming — pauses the live search. */
+  const [isExplaining, setIsExplaining] = useState(false);
   const scanCancelRef = useRef(false);
 
   const engine = useStockfish({ multipv: MULTIPV });
@@ -156,13 +158,17 @@ export default function AnalysisBoardClient() {
   }, [appliedPgn, newGame]);
 
   // ---- Live evaluation of the position on the board -----------------------
+  // Paused while the coach is generating: the AI provider may be a local model
+  // sharing this machine, and an infinite full-strength search alongside it made
+  // explanations measurably slower (llama3 fell from ~20 to ~12 tok/s under
+  // load). The eval bar resumes the moment the explanation finishes.
   useEffect(() => {
-    if (!isReady || isScanning) return;
+    if (!isReady || isScanning || isExplaining) return;
     startInfinite(currentFen, MULTIPV);
     // Only the live search is torn down here — this cleanup fires after a
     // full-game scan has already queued its first request.
     return () => stopInfinite();
-  }, [isReady, isScanning, currentFen, startInfinite, stopInfinite]);
+  }, [isReady, isScanning, isExplaining, currentFen, startInfinite, stopInfinite]);
 
   // ---- Navigation ---------------------------------------------------------
   const goToPly = useCallback(
@@ -335,14 +341,16 @@ export default function AnalysisBoardClient() {
   const buildExplainParams = useCallback(async (): Promise<ExplainParams | null> => {
     if (!currentNode || !isReady) return null;
 
-    // Submitting supersedes the live search; restart it afterwards so the eval
-    // bar does not freeze once the explanation has what it needs.
+    // Submitting supersedes the live search. It is deliberately NOT restarted
+    // here: the caller is about to stream an explanation from a local model on
+    // this same machine, and an infinite search at full strength was competing
+    // for the cores that generation needs. The effect above restarts it once
+    // `isExplaining` goes false.
     const result = await analyze({
       fen: currentNode.fenBefore,
       depth: EXPLAIN_DEPTH,
       multipv: MULTIPV,
     });
-    startInfinite(currentFen, MULTIPV);
 
     if (!result.bestMove) return null;
 
@@ -366,7 +374,7 @@ export default function AnalysisBoardClient() {
         ? ["best", "excellent", "good"].includes(currentAnalysis.classification)
         : result.bestMove === currentNode.uci,
     };
-  }, [currentNode, currentAnalysis, currentFen, isReady, analyze, startInfinite]);
+  }, [currentNode, currentAnalysis, isReady, analyze]);
 
   const scanPercent = scanProgress
     ? Math.round((scanProgress.done / scanProgress.total) * 100)
@@ -585,6 +593,7 @@ export default function AnalysisBoardClient() {
             // Remounting on position change is what clears the previous explanation.
             key={`${currentFen}:${currentPly}`}
             buildParams={buildExplainParams}
+            onStreamingChange={setIsExplaining}
             disabled={!isReady || !currentNode || isScanning}
           />
 
