@@ -15,25 +15,17 @@ type ExplainPanelProps = {
    * e.g. at the root position, or before the engine has produced any lines.
    */
   buildParams: () => Promise<ExplainParams | null>;
-  /** Changing this clears the previous explanation (used for the current ply). */
-  resetKey: string | number;
   disabled?: boolean;
 };
 
-export default function ExplainPanel({ buildParams, resetKey, disabled }: ExplainPanelProps) {
+// The caller passes a `key` derived from the position, so moving to a different
+// move remounts this panel: state resets and the unmount cleanup below abandons
+// any in-flight explanation. That replaces the old `resetKey` sync effect.
+export default function ExplainPanel({ buildParams, disabled }: ExplainPanelProps) {
   const [text, setText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  // Abandon an in-flight explanation when the user navigates elsewhere.
-  useEffect(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setText("");
-    setError(null);
-    setIsStreaming(false);
-  }, [resetKey]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -131,9 +123,16 @@ export default function ExplainPanel({ buildParams, resetKey, disabled }: Explai
           {text}
           {isStreaming && <span className="inline-block w-1.5 h-4 ml-0.5 bg-kca-cyan align-middle animate-pulse" />}
         </p>
+      ) : disabled ? (
+        // Say *why* it is unavailable — landing on the start position with the
+        // button greyed out and no reason reads as a broken feature.
+        <p className="text-sm text-kca-gray-400">
+          Select a move first — click one in the move list, or step forward with ›.
+          There is no move to explain at the starting position.
+        </p>
       ) : (
         <p className="text-sm text-kca-gray-400">
-          Ask Claude why the engine prefers a different move here.
+          Ask your AI coach why the engine prefers a different move here.
         </p>
       )}
     </div>

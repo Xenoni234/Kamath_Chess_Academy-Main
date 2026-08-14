@@ -10,15 +10,22 @@ type GameClockProps = {
   onExpire?: () => void;
 };
 
-export default function GameClock({ timeMs, isActive, format, onExpire }: GameClockProps) {
+// `format` is accepted for call-site symmetry with the other clock props but is
+// not rendered — the display format is derived from `timeMs`.
+export default function GameClock({ timeMs, isActive, onExpire }: GameClockProps) {
   const [localTime, setLocalTime] = useState(timeMs);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const expiredRef = useRef(false);
 
-  // Sync internal state when server updates timeMs
-  useEffect(() => {
+  // The server pushes an authoritative `timeMs` that overrides the local
+  // countdown. Adjusting during render rather than in an effect means the new
+  // value is shown on the first render after it arrives, with no stale frame in
+  // between. See react.dev — "adjusting some state when a prop changes".
+  const [syncedTimeMs, setSyncedTimeMs] = useState(timeMs);
+  if (timeMs !== syncedTimeMs) {
+    setSyncedTimeMs(timeMs);
     setLocalTime(timeMs);
-  }, [timeMs]);
+  }
 
   // Fire once when this clock runs out while active. The server re-validates
   // the real remaining time before ending the game, so this is only a trigger.

@@ -23,7 +23,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
       );
     }
 
-    const { solved, timeTakenMs } = parsed.data;
+    // `timeTakenMs` is accepted and validated by the schema but not yet stored.
+    const { solved } = parsed.data;
     const puzzle = await db.puzzle.findUnique({ where: { id: puzzleId }, select: { rating: true } });
 
     if (!puzzle) {

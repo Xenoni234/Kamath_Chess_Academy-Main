@@ -20,20 +20,22 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  async function load() {
-    try {
-      const res = await fetch("/api/notifications");
-      const data = await res.json();
-      if (data.success) {
+  useEffect(() => {
+    // `cancelled` stops a poll that resolves after unmount from setting state.
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch("/api/notifications");
+        const data = await res.json();
+        if (cancelled || !data.success) return;
         setItems(data.notifications);
         setUnread(data.unread);
+      } catch {
+        // Non-fatal; the bell just shows the last state.
       }
-    } catch {
-      // Non-fatal; the bell just shows the last state.
     }
-  }
 
-  useEffect(() => {
     void load();
     const interval = setInterval(load, 30_000);
     const socket = getSocket();
@@ -42,6 +44,7 @@ export default function NotificationBell() {
       setUnread((u) => u + 1);
     });
     return () => {
+      cancelled = true;
       clearInterval(interval);
       socket.off("notification:new");
     };

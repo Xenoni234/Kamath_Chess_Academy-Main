@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   parseBestMove,
   parseInfoLine,
@@ -8,6 +8,13 @@ import {
   type EngineLine,
 } from "@/lib/engine/uci";
 import { defaultThreads, selectEngine, type EngineFlavor } from "@/lib/engine/select";
+
+/**
+ * Stable no-op subscribe for the hydration probe below. The value never changes
+ * after the first client render so there is nothing to listen to, but the
+ * function identity must be stable or React resubscribes on every render.
+ */
+const subscribeNever = () => () => {};
 
 export type AnalyzeRequest = {
   fen: string;
@@ -89,6 +96,12 @@ export function useStockfish(options: UseStockfishOptions = {}) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lines, setLines] = useState<EngineLine[]>([]);
   const [engine] = useState(() => (typeof window === "undefined" ? null : selectEngine()));
+  // `engine` is null on the server but already resolved during the first browser
+  // render, so `engineLabel` would differ between the two and React reports a
+  // hydration mismatch. `false` during SSR and the hydration render, `true`
+  // afterwards — so the neutral name is held until it is safe to reveal which
+  // build actually loaded.
+  const hydrated = useSyncExternalStore(subscribeNever, () => true, () => false);
 
   const post = useCallback((command: string) => {
     workerRef.current?.postMessage(command);
@@ -353,6 +366,6 @@ export function useStockfish(options: UseStockfishOptions = {}) {
     setStrength,
     newGame,
     flavor: (engine?.flavor ?? "wasm-st") as EngineFlavor,
-    engineLabel: engine?.label ?? "Stockfish",
+    engineLabel: hydrated ? (engine?.label ?? "Stockfish") : "Stockfish",
   };
 }

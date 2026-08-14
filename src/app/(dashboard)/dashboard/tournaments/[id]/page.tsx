@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Trophy, ArrowLeft, Loader2, Play, SkipForward, Flag, Check } from "lucide-react";
@@ -37,7 +37,9 @@ export default function TournamentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const notFound = useRef(false);
+  // Drives which branch renders, so it has to be state — a ref read during
+  // render would not re-render when the lookup fails.
+  const [notFound, setNotFound] = useState(false);
 
   const load = useCallback(async () => {
     const [detail, me] = await Promise.all([
@@ -48,13 +50,24 @@ export default function TournamentDetailPage() {
       setT(detail.tournament);
       setStandings(detail.tournament.standings);
     } else {
-      notFound.current = true;
+      setNotFound(true);
     }
     if (me.success) setRole(me.user.role);
   }, [id]);
 
   useEffect(() => {
-    load().finally(() => setLoading(false));
+    // `cancelled` stops the initial load from clearing the spinner after unmount.
+    let cancelled = false;
+
+    async function initialLoad() {
+      await load();
+      if (!cancelled) setLoading(false);
+    }
+
+    void initialLoad();
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   // Live socket: watch the tournament room, react to pairings and leaderboard.
@@ -113,7 +126,7 @@ export default function TournamentDetailPage() {
     );
   }
 
-  if (!t || notFound.current) {
+  if (!t || notFound) {
     return (
       <div className="max-w-3xl mx-auto text-center py-20 text-kca-gray-400">
         <p className="mb-4">Tournament not found.</p>
