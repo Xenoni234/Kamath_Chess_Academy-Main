@@ -32,11 +32,13 @@ export async function getStudentCards(userId: string): Promise<StatCard[]> {
 }
 
 export async function getCoachCards(userId: string): Promise<StatCard[]> {
-  const [batchCount, classCount, batches] = await Promise.all([
-    db.batch.count({ where: { coach: { userId } } }),
+  // No separate batch.count: it ran the identical `where` as the findMany below,
+  // so the number is already derivable from the rows we fetch anyway.
+  const [classCount, batches] = await Promise.all([
     db.class.count({ where: { coach: { userId }, endsAt: { gte: new Date() } } }),
     db.batch.findMany({ where: { coach: { userId } }, select: { id: true } }),
   ]);
+  const batchCount = batches.length;
   const batchIds = batches.map((b) => b.id);
   const students = batchIds.length
     ? await db.classEnrollment.findMany({ where: { batchId: { in: batchIds } }, select: { userId: true }, distinct: ["userId"] })
@@ -52,8 +54,15 @@ export async function getCoachCards(userId: string): Promise<StatCard[]> {
 export async function getParentCards(userId: string): Promise<StatCard[]> {
   const links = await db.parentStudent.findMany({ where: { parentId: userId }, select: { studentId: true } });
   const studentIds = links.map((l) => l.studentId);
-  // DPDPA: record that a parent accessed their (minor) children's data.
-  await writeAuditLog({ action: "PARENT_VIEW_DASHBOARD", userId, metadata: { studentIds } });
+  // DPDPA: record that a parent accessed their (minor) children's data. Nothing
+  // below depends on it, so it runs alongside the stat queries instead of
+  // blocking them on an extra round trip. `writeAuditLog` already swallows its
+  // own errors, so a failed log cannot fail the dashboard.
+  const auditLogged = writeAuditLog({
+    action: "PARENT_VIEW_DASHBOARD",
+    userId,
+    metadata: { studentIds },
+  });
 
   const [upcoming, reports, topRating] = await Promise.all([
     upcomingClassCount(studentIds),
@@ -62,6 +71,11 @@ export async function getParentCards(userId: string): Promise<StatCard[]> {
       ? db.rating.findFirst({ where: { userId: { in: studentIds } }, orderBy: { rating: "desc" }, select: { rating: true } })
       : Promise.resolve(null),
   ]);
+
+  // Awaited before returning so the access record is durable, but it overlapped
+  // the queries above rather than serialising ahead of them.
+  await auditLogged;
+
   return [
     { label: "Children", value: studentIds.length, hint: studentIds.length === 0 ? "None linked" : undefined },
     { label: "Upcoming Classes", value: upcoming, href: "/dashboard/classes" },

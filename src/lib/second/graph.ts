@@ -14,7 +14,12 @@
  */
 import neo4j, { type Driver } from "neo4j-driver";
 import { START_FEN } from "@/lib/engine/analysis";
-import type { TranspositionLine, TrieNode, WeaknessPosition } from "@/lib/second/types";
+import type {
+  GraphSkipReason,
+  TranspositionLine,
+  TrieNode,
+  WeaknessPosition,
+} from "@/lib/second/types";
 
 let driver: Driver | null = null;
 
@@ -84,25 +89,36 @@ async function loadTrieToGraph(profileId: string, root: TrieNode): Promise<void>
   const edges = collectEdges(root);
   const session = d.session();
   try {
-    await session.run(`MATCH (p:Position {profileId:$pid}) DETACH DELETE p`, { pid: profileId });
-    await session.run(
-      `MERGE (r:Position {profileId:$pid, key:$key}) SET r.ply = 0, r.fen = $fen`,
-      { pid: profileId, key: positionKey(START_FEN), fen: START_FEN },
-    );
-
-    const CHUNK = 500;
-    for (let i = 0; i < edges.length; i += CHUNK) {
-      await session.run(
-        `UNWIND $edges AS e
-         MERGE (a:Position {profileId:$pid, key:e.fromKey})
-           ON CREATE SET a.ply = e.fromPly, a.fen = e.fromFen
-         MERGE (b:Position {profileId:$pid, key:e.toKey})
-           ON CREATE SET b.ply = e.toPly, b.fen = e.toFen
-         MERGE (a)-[r:MOVE {profileId:$pid, san:e.san}]->(b)
-           ON CREATE SET r.weight = e.weight
-           ON MATCH SET r.weight = r.weight + e.weight`,
-        { pid: profileId, edges: edges.slice(i, i + CHUNK) },
+    // One explicit transaction for the whole replace. Previously the DETACH
+    // DELETE committed on its own, so a failure before the loads finished left
+    // the profile with *zero* positions — indistinguishable from "never ran".
+    // All-or-nothing means a failed reload leaves the previous graph intact.
+    const tx = session.beginTransaction();
+    try {
+      await tx.run(`MATCH (p:Position {profileId:$pid}) DETACH DELETE p`, { pid: profileId });
+      await tx.run(
+        `MERGE (r:Position {profileId:$pid, key:$key}) SET r.ply = 0, r.fen = $fen`,
+        { pid: profileId, key: positionKey(START_FEN), fen: START_FEN },
       );
+
+      const CHUNK = 500;
+      for (let i = 0; i < edges.length; i += CHUNK) {
+        await tx.run(
+          `UNWIND $edges AS e
+           MERGE (a:Position {profileId:$pid, key:e.fromKey})
+             ON CREATE SET a.ply = e.fromPly, a.fen = e.fromFen
+           MERGE (b:Position {profileId:$pid, key:e.toKey})
+             ON CREATE SET b.ply = e.toPly, b.fen = e.toFen
+           MERGE (a)-[r:MOVE {profileId:$pid, san:e.san}]->(b)
+             ON CREATE SET r.weight = e.weight
+             ON MATCH SET r.weight = r.weight + e.weight`,
+          { pid: profileId, edges: edges.slice(i, i + CHUNK) },
+        );
+      }
+      await tx.commit();
+    } catch (error) {
+      await tx.rollback();
+      throw error;
     }
   } finally {
     await session.close();
@@ -158,14 +174,25 @@ export async function runGraphStage(
   profileId: string,
   root: TrieNode,
   weaknesses: WeaknessPosition[],
-): Promise<{ transpositions: TranspositionLine[]; graphUsed: boolean }> {
-  if (!graphEnabled()) return { transpositions: [], graphUsed: false };
+): Promise<{
+  transpositions: TranspositionLine[];
+  graphUsed: boolean;
+  graphSkipReason?: GraphSkipReason;
+}> {
+  if (!graphEnabled()) {
+    // Logged because a silent return here is indistinguishable from the stage
+    // never being reached, which makes a missing dossier section hard to trace.
+    console.warn(
+      "[second] Neo4j transposition stage skipped: NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD not set.",
+    );
+    return { transpositions: [], graphUsed: false, graphSkipReason: "not-configured" };
+  }
   try {
     await loadTrieToGraph(profileId, root);
     const transpositions = await findTranspositions(profileId, weaknesses);
     return { transpositions, graphUsed: true };
   } catch (error) {
     console.error("[second] Neo4j transposition stage failed:", error);
-    return { transpositions: [], graphUsed: false };
+    return { transpositions: [], graphUsed: false, graphSkipReason: "failed" };
   }
 }

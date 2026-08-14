@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { createClassSchema } from "@/lib/validations/phase3";
 import { coachProfileIdForUser } from "../batches/route";
-import { createNotification } from "@/lib/notify";
+import { createNotifications } from "@/lib/notify";
 import { writeAuditLog } from "@/lib/audit";
 
 type ClassRow = {
@@ -31,10 +31,15 @@ function shape(rows: ClassRow[]) {
   }));
 }
 
+// `select` rather than `include` on the coach: only the username is rendered
+// (see `shape`), and `include` pulled every CoachProfile column with it.
 const CLASS_INCLUDE = {
   batch: { select: { name: true } },
-  coach: { include: { user: { select: { username: true } } } },
+  coach: { select: { user: { select: { username: true } } } },
 } as const;
+
+/** Upper bound on a schedule listing, so the query cannot grow without limit. */
+const CLASS_PAGE_SIZE = 200;
 
 async function batchIdsForStudents(studentIds: string[]): Promise<string[]> {
   if (studentIds.length === 0) return [];
@@ -57,7 +62,7 @@ export async function GET(request: NextRequest) {
     const upcoming = { endsAt: { gte: now } };
 
     if (payload.role === "HR" || payload.role === "HEAD") {
-      const rows = await db.class.findMany({ where: upcoming, include: CLASS_INCLUDE, orderBy: { startsAt: "asc" } });
+      const rows = await db.class.findMany({ where: upcoming, include: CLASS_INCLUDE, orderBy: { startsAt: "asc" }, take: CLASS_PAGE_SIZE });
       return NextResponse.json({ success: true, classes: shape(rows) });
     }
 
@@ -66,6 +71,7 @@ export async function GET(request: NextRequest) {
         where: { ...upcoming, coach: { userId: payload.userId } },
         include: CLASS_INCLUDE,
         orderBy: { startsAt: "asc" },
+        take: CLASS_PAGE_SIZE,
       });
       return NextResponse.json({ success: true, classes: shape(rows) });
     }
@@ -76,6 +82,7 @@ export async function GET(request: NextRequest) {
         where: { ...upcoming, batchId: { in: batchIds } },
         include: CLASS_INCLUDE,
         orderBy: { startsAt: "asc" },
+        take: CLASS_PAGE_SIZE,
       });
       return NextResponse.json({ success: true, classes: shape(rows) });
     }
@@ -94,6 +101,7 @@ export async function GET(request: NextRequest) {
       where: { ...upcoming, batchId: { in: batchIds } },
       include: CLASS_INCLUDE,
       orderBy: { startsAt: "asc" },
+      take: CLASS_PAGE_SIZE,
     });
     return NextResponse.json({ success: true, classes: shape(rows) });
   } catch {
@@ -141,20 +149,35 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Notify enrolled students + the coach.
+    // Notify enrolled students + the coach. The enrollment list and the coach
+    // lookup are independent, so they overlap; the fan-out is then a single
+    // insert rather than one round trip per student.
     const when = new Date(startsAt).toLocaleString();
-    const enrollments = await db.classEnrollment.findMany({ where: { batchId }, select: { userId: true } });
-    await Promise.all(
-      enrollments.map((e) =>
-        createNotification({ userId: e.userId, type: "CLASS_REMINDER", title: "New class scheduled", body: `${title} — ${when}` }),
-      ),
-    );
-    if (coachId) {
-      const coach = await db.coachProfile.findUnique({ where: { id: coachId }, select: { userId: true } });
-      if (coach) {
-        await createNotification({ userId: coach.userId, type: "CLASS_REMINDER", title: "New class assigned", body: `${title} — ${when}` });
-      }
-    }
+    const [enrollments, coach] = await Promise.all([
+      db.classEnrollment.findMany({ where: { batchId }, select: { userId: true } }),
+      coachId
+        ? db.coachProfile.findUnique({ where: { id: coachId }, select: { userId: true } })
+        : Promise.resolve(null),
+    ]);
+
+    await createNotifications([
+      ...enrollments.map((e) => ({
+        userId: e.userId,
+        type: "CLASS_REMINDER" as const,
+        title: "New class scheduled",
+        body: `${title} — ${when}`,
+      })),
+      ...(coach
+        ? [
+            {
+              userId: coach.userId,
+              type: "CLASS_REMINDER" as const,
+              title: "New class assigned",
+              body: `${title} — ${when}`,
+            },
+          ]
+        : []),
+    ]);
 
     return NextResponse.json({ success: true, class: created });
   } catch {

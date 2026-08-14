@@ -13,9 +13,19 @@ export async function GET(request: NextRequest) {
   }
   try {
     verifyAccessToken(token);
+    // Only these fields are read below, and the listing needs an upper bound —
+    // it previously fetched whole rows for every tournament ever held.
     const tournaments = await db.tournament.findMany({
       orderBy: { startsAt: "desc" },
-      include: { _count: { select: { players: true } } },
+      take: 100,
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        status: true,
+        startsAt: true,
+        _count: { select: { players: true } },
+      },
     });
     return NextResponse.json({
       success: true,

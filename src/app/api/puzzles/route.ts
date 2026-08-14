@@ -47,23 +47,35 @@ export async function GET(request: NextRequest) {
 
     // No reviews due — serve a fresh puzzle. Prefer ones the user has never
     // attempted, picked at random so "next puzzle" doesn't repeat.
-    const attempted = await db.puzzleAttempt.findMany({
-      where: { userId: payload.userId },
-      select: { puzzleId: true },
-    });
-    const attemptedIds = attempted.map((a) => a.puzzleId);
+    //
+    // This used to load *every* puzzleId the user had ever attempted into memory
+    // and send them back as `id: { notIn: [...] }` against a ~500k-row table,
+    // then `count()` + a random OFFSET on top. All three are unbounded. Now the
+    // exclusion is a NOT EXISTS via the relation filter, and the random pick is
+    // an index seek on `rating` followed by a short forward walk.
     const themeFilter = theme ? { has: theme } : undefined;
 
     const pickRandom = async (excludeAttempted: boolean) => {
-      const where = {
-        rating: { gte: minRating, lte: maxRating },
+      const target = minRating + Math.floor(Math.random() * Math.max(1, maxRating - minRating));
+      const base = {
         themes: themeFilter,
-        id: excludeAttempted && attemptedIds.length ? { notIn: attemptedIds } : undefined,
+        ...(excludeAttempted ? { attempts: { none: { userId: payload.userId } } } : {}),
       };
-      const total = await db.puzzle.count({ where });
-      if (total === 0) return null;
-      const skip = Math.floor(Math.random() * Math.max(1, total - limit + 1));
-      return db.puzzle.findMany({ where, take: limit, skip });
+
+      const forward = await db.puzzle.findMany({
+        where: { ...base, rating: { gte: target, lte: maxRating } },
+        take: limit,
+        orderBy: { rating: "asc" },
+      });
+      if (forward.length > 0) return forward;
+
+      // Seek landed in a sparse part of the band — walk back down instead.
+      const backward = await db.puzzle.findMany({
+        where: { ...base, rating: { gte: minRating, lte: target } },
+        take: limit,
+        orderBy: { rating: "desc" },
+      });
+      return backward.length > 0 ? backward : null;
     };
 
     const puzzles = (await pickRandom(true)) ?? (await pickRandom(false));
