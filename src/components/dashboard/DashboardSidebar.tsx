@@ -66,12 +66,19 @@ export default function DashboardSidebar({ username, role }: { username: string;
   const visibleItems = navItems.filter((item) => !item.roles || item.roles.includes(roleUpper));
 
   // Pinned from `md` up so long pages scroll under a stationary sidebar.
+  //
   // `self-start` is load-bearing: the parent in (dashboard)/layout.tsx is a flex
   // row, and the default `align-items: stretch` would size this to the full
-  // container height, which silently cancels `sticky`. Below `md` the layout
-  // stacks, so it stays in normal flow.
+  // container height, which silently cancels `sticky`.
+  //
+  // `overflow-hidden` (not `overflow-y-auto`) is the other half: scrolling the
+  // whole aside pushed the theme/logout buttons below the fold. Only the nav
+  // list scrolls — see the `md:flex-1 md:overflow-y-auto` on <nav> below — so
+  // the logo, user card and footer buttons stay put at all times.
+  //
+  // Below `md` the layout stacks vertically, so it stays in normal flow.
   return (
-    <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 select-none md:sticky md:top-0 md:h-screen md:w-72 md:self-start md:overflow-y-auto">
+    <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 select-none md:sticky md:top-0 md:h-screen md:w-72 md:self-start md:overflow-hidden">
       <Link href="/" className="mb-8 flex items-center gap-3 rounded-xl border border-kca-border bg-kca-black p-3">
         <Image src="/kca-logo.png" alt="KCA" width={44} height={44} className="h-11 w-11 object-contain" />
         <div>
@@ -91,7 +98,10 @@ export default function DashboardSidebar({ username, role }: { username: string;
         <NotificationBell />
       </div>
 
-      <nav className="space-y-2">
+      {/* `min-h-0` is required — a flex child's default `min-height: auto`
+          refuses to shrink below its content, so without it the nav would push
+          the footer out of the aside instead of scrolling. */}
+      <nav className="space-y-2 md:min-h-0 md:flex-1 md:overflow-y-auto">
         {visibleItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;

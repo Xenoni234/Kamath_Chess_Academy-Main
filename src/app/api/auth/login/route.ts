@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
         OR: [{ email: identifier.toLowerCase() }, { username: identifier }],
         isActive: true,
       },
+      // Only these fields are used below; without a select the whole row crosses
+      // the wire on every login attempt.
+      select: { id: true, username: true, email: true, role: true, passwordHash: true },
     });
 
     if (!user || !(await comparePassword(password, user.passwordHash))) {
@@ -33,24 +36,19 @@ export async function POST(request: NextRequest) {
     const refreshToken = signRefreshToken(tokenPayload);
     const expiresAt = addDays(new Date(), 7);
 
-    await db.userSession.create({
-      data: {
-        userId: user.id,
-        refreshToken,
-        expiresAt,
-        userAgent: request.headers.get("user-agent"),
-        ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
-      },
-    });
+    const userAgent = request.headers.get("user-agent");
+    const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
 
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: "USER_LOGGED_IN",
-        userAgent: request.headers.get("user-agent"),
-        ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
-      },
-    });
+    // Independent writes — running them one after the other cost two full round
+    // trips to Tokyo instead of one.
+    await Promise.all([
+      db.userSession.create({
+        data: { userId: user.id, refreshToken, expiresAt, userAgent, ipAddress },
+      }),
+      db.auditLog.create({
+        data: { userId: user.id, action: "USER_LOGGED_IN", userAgent, ipAddress },
+      }),
+    ]);
 
     const response = NextResponse.json({
       success: true,
