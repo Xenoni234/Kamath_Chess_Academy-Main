@@ -29,7 +29,7 @@ const MIN_SOUND_CP = -40;
 const MAX_TARGETS = 20;
 
 export type NoveltyBudget = { depth: number; multiPv: number; threads: number; totalTimeoutMs: number };
-const DEFAULT_BUDGET: NoveltyBudget = { depth: 12, multiPv: 3, threads: 2, totalTimeoutMs: 5 * 60 * 1000 };
+const DEFAULT_BUDGET: NoveltyBudget = { depth: 12, multiPv: 3, threads: 1, totalTimeoutMs: 5 * 60 * 1000 };
 
 export type NoveltyTarget = { fen: string; line: string[] };
 

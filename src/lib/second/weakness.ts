@@ -27,7 +27,7 @@ const MAX_POSITIONS = 30;
 const ACCURACY_CEILING = 88;
 
 export type WeaknessBudget = { depth: number; threads: number; totalTimeoutMs: number };
-const DEFAULT_BUDGET: WeaknessBudget = { depth: 12, threads: 2, totalTimeoutMs: 5 * 60 * 1000 };
+const DEFAULT_BUDGET: WeaknessBudget = { depth: 12, threads: 1, totalTimeoutMs: 5 * 60 * 1000 };
 
 type MoveAgg = { uci: string; fenAfter: string; weight: number };
 type PositionAgg = {
