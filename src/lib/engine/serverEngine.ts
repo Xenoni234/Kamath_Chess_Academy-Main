@@ -45,7 +45,7 @@ export type AnalyzeBudget = {
 
 export const DEFAULT_BUDGET: AnalyzeBudget = {
   depth: 12,
-  threads: 2,
+  threads: 1,
   totalTimeoutMs: 8 * 60 * 1000,
 };
 
@@ -70,8 +70,34 @@ type EngineModule = {
   _isReady?: () => boolean;
 };
 
+/**
+ * The real `fetch`, captured at module load — before any engine has booted.
+ *
+ * The Emscripten runtime clobbers `globalThis.fetch` while it boots. Saving it
+ * per-boot is only safe when boots are serialised: with a pool, engine B can
+ * capture the *already clobbered* fetch that engine A has not restored yet, and
+ * then faithfully restore the broken one. Everything downstream (the opening
+ * explorer, Upstash, the AI narrative) then dies with "fetch is not a function".
+ * Anchoring to the pristine reference removes the ordering question entirely.
+ */
+const PRISTINE_FETCH = globalThis.fetch;
+
+/**
+ * Boots are serialised. Emscripten module init touches process-global state, and
+ * a pool would otherwise interleave several inits. Each boot is ~300ms, so even
+ * eight cost ~2.4s once — negligible against the search work they then do.
+ */
+let bootQueue: Promise<unknown> = Promise.resolve();
+
 /** Boot an engine instance and wait for `readyok`. */
-async function createEngine(threads: number): Promise<EngineHandle> {
+function createEngine(threads: number): Promise<EngineHandle> {
+  const next = bootQueue.then(() => bootEngine(threads));
+  // Keep the chain alive even if this boot rejects.
+  bootQueue = next.catch(() => {});
+  return next;
+}
+
+async function bootEngine(threads: number): Promise<EngineHandle> {
   // turbopackIgnore stops the bundler resolving (and trying to inline a 7 MB
   // engine) at build time — this path only exists at runtime. The engine file
   // is CommonJS, so its `module.exports` arrives as `default`.
@@ -89,11 +115,11 @@ async function createEngine(threads: number): Promise<EngineHandle> {
   // The Emscripten runtime clobbers the global `fetch` while it boots (it wires
   // up its own for browser asset loading). That would break every fetch the
   // profiling worker makes *after* the engine runs — the opening explorer,
-  // Upstash Redis, notifications. Save and restore the real one.
-  const savedFetch = globalThis.fetch;
+  // Upstash Redis, the AI narrative. Restore the reference captured at module
+  // load, never whatever happens to be installed now.
   await initEngine()(engineModule);
-  if (globalThis.fetch !== savedFetch) {
-    globalThis.fetch = savedFetch;
+  if (globalThis.fetch !== PRISTINE_FETCH) {
+    globalThis.fetch = PRISTINE_FETCH;
   }
 
   // Emscripten resolves its promise slightly before the engine accepts input.
@@ -135,6 +161,17 @@ async function createEngine(threads: number): Promise<EngineHandle> {
   return engine;
 }
 
+/**
+ * How long to keep listening after `stop` before giving up on a `bestmove`.
+ *
+ * `stop` always makes the engine emit one, usually within milliseconds. This
+ * grace only exists for a genuinely wedged engine.
+ */
+const STOP_GRACE_MS = 5_000;
+
+/** Warn when a search takes far longer than its depth should need. */
+const SLOW_SEARCH_LOG_MS = 10_000;
+
 function searchPosition(
   engine: EngineHandle,
   fen: string,
@@ -145,19 +182,30 @@ function searchPosition(
     let cp: number | null = null;
     let mate: number | null = null;
     let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
 
     const finish = (bestMove: string) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(graceTimer);
       engine.listener = undefined;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > SLOW_SEARCH_LOG_MS) {
+        console.warn(`[serverEngine] slow search: ${elapsed}ms at depth ${depth}`);
+      }
       resolve({ cp, mate, bestMove });
     };
 
-    // A hung search must not stall the whole report.
+    // A hung search must not stall the whole report — but we must NOT abandon
+    // the listener here. `stop` produces a `bestmove` asynchronously; resolving
+    // before it arrives leaves that message to be picked up by the *next*
+    // search's listener, which then resolves the wrong position (and every
+    // search after it) with a stale result. Keep listening until it lands.
     const timer = setTimeout(() => {
       engine.sendCommand("stop");
-      finish("");
+      graceTimer = setTimeout(() => finish(""), STOP_GRACE_MS);
     }, timeoutMs);
 
     engine.listener = (line: string) => {
@@ -175,6 +223,152 @@ function searchPosition(
     engine.sendCommand(`position fen ${fen}`);
     engine.sendCommand(`go depth ${depth}`);
   });
+}
+
+/** A search result that keeps the whole principal variation, not just its head. */
+export type PvResult = {
+  /** Best move in UCI, or "" when the search produced nothing. */
+  bestMove: string;
+  cp: number | null;
+  mate: number | null;
+  /** Full PV in UCI, deepest snapshot seen. First entry equals `bestMove`. */
+  pv: string[];
+};
+
+/**
+ * Like `searchPosition`, but keeps `info.pv`.
+ *
+ * The engine already computes a whole principal variation on every search and
+ * the other helpers here throw it away. Keeping it means one search can supply
+ * a dozen plies of continuation instead of a single move — which is what makes
+ * long repertoire lines affordable.
+ */
+function searchPositionWithPv(
+  engine: EngineHandle,
+  fen: string,
+  depth: number,
+  timeoutMs: number,
+): Promise<PvResult> {
+  return new Promise((resolve) => {
+    let cp: number | null = null;
+    let mate: number | null = null;
+    let pv: string[] = [];
+    let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
+
+    const finish = (bestMove: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(graceTimer);
+      engine.listener = undefined;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > SLOW_SEARCH_LOG_MS) {
+        console.warn(`[serverEngine] slow PV search: ${elapsed}ms at depth ${depth}`);
+      }
+      resolve({ bestMove, cp, mate, pv });
+    };
+
+    // See `searchPosition`: keep listening after `stop` so the `bestmove` it
+    // produces is consumed here rather than by the next search.
+    const timer = setTimeout(() => {
+      engine.sendCommand("stop");
+      graceTimer = setTimeout(() => finish(pv[0] ?? ""), STOP_GRACE_MS);
+    }, timeoutMs);
+
+    engine.listener = (line: string) => {
+      const info = parseInfoLine(line, fen);
+      if (info && info.multipv === 1 && info.pv.length > 0) {
+        cp = info.cp;
+        mate = info.mate;
+        pv = info.pv;
+        return;
+      }
+
+      const best = parseBestMove(line);
+      if (best) finish(best.bestMove === "(none)" ? "" : best.bestMove);
+    };
+
+    engine.sendCommand(`position fen ${fen}`);
+    engine.sendCommand(`go depth ${depth}`);
+  });
+}
+
+
+/**
+ * Default fan-out for batch engine work.
+ *
+ * Measured on this hardware: for FIXED-DEPTH searches, more threads per engine
+ * is *slower* — SMP widens the search, so nodes-to-depth grows faster than nps
+ * (depth 20: 1311ms at threads=1 versus 1762ms at threads=4). Throughput comes
+ * from running many single-threaded engines instead, which scales close to
+ * linearly. Leaving 2 cores free keeps the web server responsive while a
+ * dossier generates.
+ */
+export const ENGINE_CONCURRENCY = 8;
+
+/**
+ * Run `worker` over `items` across a pool of single-threaded engines.
+ *
+ * Each worker gets its own engine and therefore its own transposition table, so
+ * items that share an opening tree still benefit within a worker. Results keep
+ * the order of `items`. A failing item does not sink the batch — it resolves as
+ * `null` and the caller decides.
+ */
+export async function mapWithEngines<T, R>(
+  items: T[],
+  worker: (item: T, search: (fen: string, depth: number) => Promise<PvResult>) => Promise<R>,
+  options: { concurrency?: number; threads?: number; totalTimeoutMs?: number } = {},
+): Promise<(R | null)[]> {
+  if (items.length === 0) return [];
+
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? ENGINE_CONCURRENCY, items.length));
+  const threads = options.threads ?? 1;
+  const totalTimeoutMs = options.totalTimeoutMs ?? DEFAULT_BUDGET.totalTimeoutMs;
+  const deadline = Date.now() + totalTimeoutMs;
+
+  const results: (R | null)[] = new Array(items.length).fill(null);
+  let cursor = 0;
+
+  const runOne = async () => {
+    let engine: EngineHandle | null = null;
+    try {
+      engine = await createEngine(threads);
+      engine.sendCommand("ucinewgame");
+      const handle = engine;
+
+      // `cursor++` is safe: JS is single-threaded, so no two workers can claim
+      // the same index.
+      for (let index = cursor++; index < items.length; index = cursor++) {
+        if (Date.now() > deadline) break;
+        try {
+          results[index] = await worker(items[index], async (fen, depth) => {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) return { bestMove: "", cp: null, mate: null, pv: [] };
+            return searchPositionWithPv(
+              handle,
+              fen,
+              depth,
+              Math.min(60_000, Math.max(1000, remaining)),
+            );
+          });
+        } catch (error) {
+          console.error(`[serverEngine] item ${index} failed:`, error);
+        }
+      }
+    } finally {
+      try {
+        engine?.sendCommand("quit");
+        engine?.terminate?.();
+      } catch {
+        // The worker may already be gone; nothing useful to do here.
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, runOne));
+  return results;
 }
 
 /**
@@ -236,12 +430,19 @@ function searchPositionMultiPV(
     // `bestmove` is the deepest one.
     const lines = new Map<number, MultiPvMove>();
     let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
 
     const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(graceTimer);
       engine.listener = undefined;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > SLOW_SEARCH_LOG_MS) {
+        console.warn(`[serverEngine] slow MultiPV search: ${elapsed}ms at depth ${depth}`);
+      }
       resolve(
         [...lines.entries()]
           .sort((a, b) => a[0] - b[0])
@@ -249,9 +450,11 @@ function searchPositionMultiPV(
       );
     };
 
+    // See `searchPosition`: keep listening after `stop` so the `bestmove` it
+    // produces is consumed here rather than by the next search.
     const timer = setTimeout(() => {
       engine.sendCommand("stop");
-      finish();
+      graceTimer = setTimeout(finish, STOP_GRACE_MS);
     }, timeoutMs);
 
     engine.listener = (line: string) => {
