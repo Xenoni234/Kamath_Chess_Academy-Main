@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { pristineFetch } from "@/lib/pristineFetch";
 import path from "node:path";
 import puppeteer from "puppeteer";
 import { Resend } from "resend";
@@ -39,7 +40,7 @@ function htmlEscape(value: string) {
 }
 
 async function fetchLichessGames(lichessId: string): Promise<NormalisedGame[]> {
-  const response = await fetch(
+  const response = await pristineFetch(
     `https://lichess.org/api/games/user/${encodeURIComponent(lichessId)}?max=${FETCH_LIMIT}&opening=true`,
     { headers: { Accept: "application/x-ndjson" } },
   );
@@ -65,7 +66,7 @@ async function fetchChessComGames(chesscomId: string): Promise<NormalisedGame[]>
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const response = await fetch(
+  const response = await pristineFetch(
     `https://api.chess.com/pub/player/${encodeURIComponent(chesscomId)}/games/${year}/${month}`,
     { headers: { Accept: "application/json" } },
   );

@@ -1,26 +1,38 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { pristineFetch } from "@/lib/pristineFetch";
 
 /**
  * AI narration for move explanations and report narratives.
  *
  * The provider is pluggable behind a stable interface so the calling routes
  * (analysis explain, report generation) never change:
- *   - "anthropic" — Claude API (needs ANTHROPIC_API_KEY). Best chess quality.
- *   - "ollama"    — a self-hosted Ollama server (OLLAMA_URL). Reserved for the
- *                   Phase 4 AI server; opt-in only.
+ *   - "openai-compatible" — any host speaking OpenAI's /chat/completions, which
+ *                   is nearly all of them (Groq, Cerebras, DeepSeek, OpenRouter,
+ *                   Together, OpenAI itself). Defaults to Groq. Switching
+ *                   provider is an env change, not a code change.
+ *   - "anthropic" — Claude API (needs ANTHROPIC_API_KEY).
+ *   - "ollama"    — a self-hosted Ollama server (OLLAMA_URL). Opt-in only; a
+ *                   model small enough to run locally is markedly weaker, and
+ *                   it competes with Stockfish for the same cores.
  *   - "template"  — deterministic, offline prose built from the engine numbers.
  *                   Free, and chess-safe (it never invents tactics).
  *
- * Selection: AI_PROVIDER wins if set; otherwise Anthropic when a key is present,
- * else the template fallback. Ollama is never auto-selected.
+ * Selection: AI_PROVIDER wins if set; otherwise whichever key is present,
+ * preferring the OpenAI-compatible host. Ollama is never auto-selected.
  */
-type AiProvider = "anthropic" | "ollama" | "template";
+type AiProvider = "anthropic" | "openai-compatible" | "ollama" | "template";
 
 function activeProvider(): AiProvider {
   const explicit = process.env.AI_PROVIDER?.toLowerCase();
-  if (explicit === "anthropic" || explicit === "ollama" || explicit === "template") {
+  if (
+    explicit === "anthropic" ||
+    explicit === "openai-compatible" ||
+    explicit === "ollama" ||
+    explicit === "template"
+  ) {
     return explicit;
   }
+  if (llmApiKey()) return "openai-compatible";
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
   return "template";
 }
@@ -61,6 +73,7 @@ export type GameReportStats = {
 export function isClaudeConfigured(): boolean {
   const provider = activeProvider();
   if (provider === "anthropic") return Boolean(process.env.ANTHROPIC_API_KEY);
+  if (provider === "openai-compatible") return Boolean(llmApiKey());
   return true;
 }
 
@@ -74,13 +87,19 @@ const REPERTOIRE_SYSTEM =
   "You are a chess second preparing a player for a specific opponent. You annotate lines that have already been chosen by engine analysis — never invent moves, never contradict the supplied evaluations.";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
-function moveExplanationPrompt(params: ChessMoveExplanationParams) {
+/**
+ * `words` is a budget, not a style choice. A 2B local model spends real seconds
+ * per token, so its explanations are kept short; a hosted model returns 150
+ * words in about the time Ollama takes for 40, and the extra room buys a
+ * genuinely better explanation rather than a padded one.
+ */
+function moveExplanationPrompt(params: ChessMoveExplanationParams, words: number) {
   const alternatives = params.topMoves
     .slice(0, 3)
     .map((move, index) => `${index + 1}. ${move.san} (${move.evaluation}): ${move.continuation}`)
     .join("\n");
 
-  return `Given this position and move choice, explain in 2-4 sentences and no more than 80 words why ${params.bestMoveSan} is correct. Mention the relevant tactics or plans, and address the student as "you".
+  return `Given this position and move choice, explain in no more than ${words} words why ${params.bestMoveSan} is correct. Mention the relevant tactics or plans, and address the student as "you".
 
 FEN: ${params.fen}
 Your move: ${params.playerMoveSan}
@@ -145,6 +164,123 @@ function textFromMessage(message: Anthropic.Messages.Message) {
 }
 
 // ---------------------------------------------------------------------------
+// Provider: OpenAI-compatible /chat/completions (default host: Groq)
+// ---------------------------------------------------------------------------
+
+const LLM_BASE_URL = (process.env.LLM_BASE_URL ?? "https://api.groq.com/openai/v1").replace(/\/+$/, "");
+const LLM_MODEL = process.env.LLM_MODEL ?? "openai/gpt-oss-120b";
+const LLM_TIMEOUT_MS = 2 * 60 * 1000;
+
+/** GROQ_API_KEY is accepted as an alias so the default host works out of the box. */
+function llmApiKey(): string | undefined {
+  return process.env.LLM_API_KEY || process.env.GROQ_API_KEY || undefined;
+}
+
+/**
+ * gpt-oss is a reasoning model: left alone it thinks at medium effort and
+ * returns that thinking in a separate `reasoning` field. For a short coach
+ * paragraph the thinking is pure latency, so effort is pinned low and the field
+ * is switched off entirely.
+ *
+ * Both parameters are Groq extensions — other OpenAI-compatible hosts reject
+ * unknown fields — so they are only sent when the host is actually Groq. Set
+ * LLM_REASONING_EFFORT=none to suppress them there too.
+ */
+function reasoningParams(): Record<string, unknown> {
+  const effort = process.env.LLM_REASONING_EFFORT ?? "low";
+  if (effort === "none") return {};
+  let host: string;
+  try {
+    host = new URL(LLM_BASE_URL).hostname;
+  } catch {
+    return {};
+  }
+  if (!(host === "groq.com" || host.endsWith(".groq.com"))) return {};
+  return { reasoning_effort: effort, include_reasoning: false };
+}
+
+function llmBody(system: string, prompt: string, maxTokens: number, stream: boolean) {
+  return JSON.stringify({
+    model: LLM_MODEL,
+    max_tokens: maxTokens,
+    stream,
+    ...reasoningParams(),
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: prompt },
+    ],
+  });
+}
+
+async function llmFetch(system: string, prompt: string, maxTokens: number, stream: boolean) {
+  const apiKey = llmApiKey();
+  if (!apiKey) {
+    throw new Error("LLM_API_KEY (or GROQ_API_KEY) is not configured");
+  }
+
+  const response = await pristineFetch(`${LLM_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    body: llmBody(system, prompt, maxTokens, stream),
+  });
+
+  if (!response.ok) {
+    // The body carries the actual reason (bad model id, rate limit, bad key),
+    // and without it every failure looks identical in the log.
+    const detail = await response.text().catch(() => "");
+    throw new Error(`LLM request failed: ${response.status} ${detail.slice(0, 300)}`);
+  }
+  return response;
+}
+
+async function llmChat(system: string, prompt: string, maxTokens: number): Promise<string> {
+  const response = await llmFetch(system, prompt, maxTokens, false);
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return (data.choices?.[0]?.message?.content ?? "").trim();
+}
+
+async function* llmChatStream(system: string, prompt: string, maxTokens: number): AsyncGenerator<string> {
+  const response = await llmFetch(system, prompt, maxTokens, true);
+  if (!response.body) throw new Error("LLM stream failed: empty body");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are newline-delimited `data: {...}` lines. Only `delta.content`
+    // is read — a reasoning model's `delta.reasoning` must never reach the user.
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const token = json.choices?.[0]?.delta?.content;
+        if (token) yield token;
+      } catch {
+        // Partial frame — wait for the rest on the next chunk.
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Provider: Ollama (self-hosted — reserved for the Phase 4 AI server)
 // ---------------------------------------------------------------------------
 
@@ -161,7 +297,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
 const OLLAMA_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function ollamaChat(system: string, prompt: string, maxTokens: number): Promise<string> {
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+  const response = await pristineFetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
@@ -185,7 +321,7 @@ async function ollamaChat(system: string, prompt: string, maxTokens: number): Pr
 }
 
 async function* ollamaChatStream(system: string, prompt: string, maxTokens: number): AsyncGenerator<string> {
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+  const response = await pristineFetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
@@ -311,19 +447,29 @@ export type OpponentRepertoireParams = {
 // Public API (stable across providers)
 // ---------------------------------------------------------------------------
 
+/** Local models are token-bound; hosted ones are not. See moveExplanationPrompt. */
+const LOCAL_EXPLANATION = { words: 80, maxTokens: 200 };
+const HOSTED_EXPLANATION = { words: 150, maxTokens: 400 };
+
 export async function explainChessMove(params: ChessMoveExplanationParams): Promise<string> {
   const provider = activeProvider();
 
   if (provider === "template") return templateMoveExplanation(params);
   if (provider === "ollama") {
-    return ollamaChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params), 200);
+    const { words, maxTokens } = LOCAL_EXPLANATION;
+    return ollamaChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens);
+  }
+
+  const { words, maxTokens } = HOSTED_EXPLANATION;
+  if (provider === "openai-compatible") {
+    return llmChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens);
   }
 
   const message = await anthropicClient().messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: 200,
+    max_tokens: maxTokens,
     system: MOVE_EXPLANATION_SYSTEM,
-    messages: [{ role: "user", content: moveExplanationPrompt(params) }],
+    messages: [{ role: "user", content: moveExplanationPrompt(params, words) }],
   });
   return textFromMessage(message);
 }
@@ -336,15 +482,22 @@ export async function* streamChessMoveExplanation(params: ChessMoveExplanationPa
     return;
   }
   if (provider === "ollama") {
-    yield* ollamaChatStream(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params), 200);
+    const { words, maxTokens } = LOCAL_EXPLANATION;
+    yield* ollamaChatStream(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens);
+    return;
+  }
+
+  const { words, maxTokens } = HOSTED_EXPLANATION;
+  if (provider === "openai-compatible") {
+    yield* llmChatStream(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens);
     return;
   }
 
   const stream = anthropicClient().messages.stream({
     model: ANTHROPIC_MODEL,
-    max_tokens: 200,
+    max_tokens: maxTokens,
     system: MOVE_EXPLANATION_SYSTEM,
-    messages: [{ role: "user", content: moveExplanationPrompt(params) }],
+    messages: [{ role: "user", content: moveExplanationPrompt(params, words) }],
   });
 
   for await (const event of stream) {
@@ -360,6 +513,9 @@ export async function generateGameReportNarrative(stats: GameReportStats): Promi
   if (provider === "template") return templateReportNarrative(stats);
   if (provider === "ollama") {
     return ollamaChat(REPORT_SYSTEM, reportPrompt(stats), 400);
+  }
+  if (provider === "openai-compatible") {
+    return llmChat(REPORT_SYSTEM, reportPrompt(stats), 600);
   }
 
   const message = await anthropicClient().messages.create({
@@ -387,6 +543,11 @@ export async function generateOpponentRepertoire(params: OpponentRepertoireParam
   try {
     if (provider === "ollama") {
       const text = await ollamaChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), 1200);
+      return text || templateRepertoireNarrative(params);
+    }
+
+    if (provider === "openai-compatible") {
+      const text = await llmChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), 1600);
       return text || templateRepertoireNarrative(params);
     }
 
