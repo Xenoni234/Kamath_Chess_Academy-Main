@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
@@ -12,6 +13,7 @@ import {
   Shuffle,
   Sparkles,
   Target,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -196,10 +198,16 @@ function Section({
 
 export default function DossierPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
+  /** Held only for the duration of the POST — see `regenerate` below. */
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  /** Two-step delete: the first click arms it, the second confirms. */
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartedAtRef = useRef(0);
 
@@ -255,6 +263,11 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
   const regenerate = useCallback(async () => {
     setRegenError(null);
+    // `isBusy` is derived from the fetched status, which cannot update until
+    // this request comes back — and the request is slow. That left the button
+    // live for the whole round trip, so an impatient click became six jobs.
+    // The server rejects the duplicates now, but not queuing them is better.
+    setIsSubmitting(true);
     try {
       const res = await fetch(`/api/second/profiles/${id}/regenerate`, { method: "POST" });
       const data = await res.json();
@@ -266,8 +279,34 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
       startPolling();
     } catch {
       setRegenError("Could not start the regeneration.");
+    } finally {
+      setIsSubmitting(false);
     }
   }, [id, load, startPolling]);
+
+  const remove = useCallback(async () => {
+    setRegenError(null);
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/second/profiles/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setRegenError(data.message ?? "Could not delete this dossier.");
+        setConfirmDelete(false);
+        return;
+      }
+      // Stop the poller before navigating, or it keeps hitting a route that
+      // now 404s and paints an error over the list page.
+      stopPolling();
+      router.replace("/dashboard/second");
+      router.refresh();
+    } catch {
+      setRegenError("Could not delete this dossier.");
+      setConfirmDelete(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [id, router, stopPolling]);
 
   if (loading) {
     return (
@@ -314,7 +353,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
           <button
             type="button"
             onClick={regenerate}
-            disabled={isBusy}
+            disabled={isBusy || isSubmitting}
             className="btn-secondary py-2 px-4 disabled:opacity-50"
             title="Re-run the analysis against this opponent with the current server setup"
           >
@@ -326,8 +365,42 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
               <Download className="h-4 w-4" /> PDF
             </a>
           )}
+          {/* Two clicks, not a window.confirm: the dialog is easy to dismiss by
+              reflex, and this keeps the warning in the page where it is read. */}
+          <button
+            type="button"
+            onClick={() => (confirmDelete ? void remove() : setConfirmDelete(true))}
+            onBlur={() => setConfirmDelete(false)}
+            disabled={isBusy || isDeleting}
+            className={cn(
+              "py-2 px-4 disabled:opacity-50",
+              confirmDelete
+                ? "btn-secondary border-kca-danger/60 text-kca-danger"
+                : "btn-secondary text-kca-gray-400 hover:text-kca-danger",
+            )}
+            title={
+              isBusy
+                ? "Wait for the current run to finish before deleting"
+                : "Permanently delete this dossier"
+            }
+          >
+            {isDeleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            {isDeleting ? "Deleting…" : confirmDelete ? "Confirm delete" : "Delete"}
+          </button>
         </div>
       </div>
+
+      {confirmDelete && !isDeleting && (
+        <div className="mb-4 rounded-xl border border-kca-danger/30 bg-kca-danger/10 px-4 py-3 text-sm text-kca-danger">
+          This permanently removes the dossier, its repertoire and its PDF. It cannot be undone —
+          you would have to profile {profile.handle} again from scratch. Click Confirm delete to
+          proceed, or click anywhere else to cancel.
+        </div>
+      )}
 
       {regenError && (
         <div className="mb-4 rounded-xl border border-kca-danger/30 bg-kca-danger/10 px-4 py-3 text-sm text-kca-danger">

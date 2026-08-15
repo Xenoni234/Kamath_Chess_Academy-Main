@@ -51,17 +51,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   // Re-running mid-flight would have two jobs writing the same artifact and the
   // same profileId-scoped Neo4j subgraph.
-  if (profile.status === "pending" || profile.status === "processing") {
+  //
+  // Claiming the row and checking it must be a SINGLE statement. Reading the
+  // status and then updating it is a TOCTOU race, and a real one: the button
+  // takes tens of seconds to respond under load, an impatient user clicks it
+  // six times, all six reads see "complete" before any write lands, and six
+  // pipelines start at once. Observed live — 6×8 engines on a 10-core machine,
+  // MaxListenersExceededWarning, and a 13.8s login while it thrashed.
+  const claimed = await db.opponentProfile.updateMany({
+    where: { id: profile.id, status: { notIn: ["pending", "processing"] } },
+    data: { status: "pending" },
+  });
+
+  if (claimed.count === 0) {
     return NextResponse.json(
       { success: false, message: "This dossier is already being generated." },
       { status: 409 },
     );
   }
-
-  await db.opponentProfile.update({
-    where: { id: profile.id },
-    data: { status: "pending" },
-  });
 
   await writeAuditLog({
     action: "second.profile.regenerate",
