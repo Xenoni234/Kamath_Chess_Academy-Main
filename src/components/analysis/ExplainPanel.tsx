@@ -48,17 +48,23 @@ export default function ExplainPanel({
     setText("");
     setError(null);
     setIsStreaming(true);
-    // Announced before `buildParams` runs: that does its own engine search, and
-    // the board should already have released the infinite one by then.
-    onStreamingChange?.(true);
 
     try {
+      // `buildParams` runs its OWN engine search, so the board's live search must
+      // still be untouched here. Announcing the pause first made the board post
+      // `stop` into the very engine this is waiting on — the search then never
+      // reported `bestmove` and the panel hung until the 30s timeout.
       const params = await buildParams();
       if (!params) {
         setError("Play or select a move first, then ask for an explanation.");
         return;
       }
       if (controller.signal.aborted) return;
+
+      // Engine work is done. Now release the board's infinite search for the
+      // duration of the stream, so the local model is not competing with a
+      // full-strength search for the same cores.
+      onStreamingChange?.(true);
 
       const response = await fetch("/api/analysis/explain", {
         method: "POST",

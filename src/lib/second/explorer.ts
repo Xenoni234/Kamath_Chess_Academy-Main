@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { pristineFetch } from "@/lib/pristineFetch";
 import { db } from "@/lib/db";
 
 /**
@@ -64,7 +65,7 @@ export async function fetchExplorer(
   )}&speeds=${speeds.join(",")}&ratings=${ratings.join(",")}&topGames=0&recentGames=0`;
 
   const lichessToken = process.env.LICHESS_API_TOKEN;
-  const response = await fetch(url, {
+  const response = await pristineFetch(url, {
     headers: {
       Accept: "application/json",
       ...(lichessToken ? { Authorization: `Bearer ${lichessToken}` } : {}),

@@ -13,6 +13,7 @@
  */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { pristineFetch } from "@/lib/pristineFetch";
 import { parseBestMove, parseInfoLine, setOption } from "./uci";
 
 export type MultiPvMove = {
@@ -79,8 +80,13 @@ type EngineModule = {
  * then faithfully restore the broken one. Everything downstream (the opening
  * explorer, Upstash, the AI narrative) then dies with "fetch is not a function".
  * Anchoring to the pristine reference removes the ordering question entirely.
+ *
+ * Restoring the global is still not enough on its own: the profiling job makes
+ * network calls *while* engines are booting, so a request can land inside the
+ * clobbered window. Callers on that path import `pristineFetch` directly, and
+ * share this same reference so there is only one notion of the real fetch.
  */
-const PRISTINE_FETCH = globalThis.fetch;
+const PRISTINE_FETCH = pristineFetch;
 
 /**
  * Boots are serialised. Emscripten module init touches process-global state, and

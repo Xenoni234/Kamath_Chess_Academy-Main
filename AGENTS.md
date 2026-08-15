@@ -58,7 +58,7 @@ in `src/proxy.ts` (this Next.js version names middleware `proxy`, not
 | Chess logic | `chess.js` | Server-side move validation is authoritative |
 | Board UI | `react-chessboard` | |
 | Engine | Stockfish 18 Lite WASM in `public/engine/` | Browser Web Worker + Node; needs COOP/COEP |
-| AI | Anthropic Claude API (`@anthropic-ai/sdk`) | Move explanations, report narratives |
+| AI | Pluggable: OpenAI-compatible host (Groq default), Anthropic, Ollama, or an offline template | Move explanations, report narratives, dossier annotation |
 | Email | Resend | OTP, invoices, reports |
 | PDF | Puppeteer | Report and invoice generation |
 
@@ -221,12 +221,19 @@ Phase 2 is feature-complete. **Done and verified this phase:**
      It cost 300 s of budget for 2.6 s of work (`budget exhausted after 34/60`)
      **and** produced wrong weakness accuracies. Measured after the fix: 60/60
      positions at depth 12 in 3.5 s, 59 ms each.
-  2. **Restore `globalThis.fetch` from `PRISTINE_FETCH`, not a per-boot save.**
-     The Emscripten runtime clobbers `fetch` while booting. With a pool of
-     engines booting concurrently, a per-boot save captures the already-clobbered
-     value and faithfully restores the broken one — everything afterwards dies
-     with `fetch is not a function`. Boots are also serialised through
-     `bootQueue` for the same reason.
+  2. **Never call the global `fetch` on any path that can run beside the engine
+     — import `pristineFetch` from `@/lib/pristineFetch`.** The Emscripten
+     runtime clobbers `globalThis.fetch` while booting. `serverEngine` restores
+     it afterwards (from that same shared reference, never a per-boot save —
+     with a pool, a per-boot save captures the already-clobbered value and
+     faithfully restores the broken one; boots are serialised through
+     `bootQueue` for the same reason). **Restoring is still not sufficient**:
+     the profiling job talks to Lichess and the AI provider *while* engines are
+     booting, so a request can land inside the clobbered window. This shipped
+     broken and was invisible — `generateOpponentRepertoire` caught the
+     `TypeError` and fell back to template prose, so every dossier looked fine
+     while silently losing its AI narrative. All of `claude.ts`, `explorer.ts`,
+     `ingest.ts` and `runReportJob.ts` now use `pristineFetch`.
 - **Engine threads are 1 on purpose, everywhere.** Measured on an M4: at fixed
   depth, more threads per engine is *slower* (depth 20: 1311 ms at threads=1 vs
   1762 ms at threads=4) because SMP widens the search. Throughput comes from
@@ -253,11 +260,22 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   handshake. Measured: 682 ms → 142 ms on a query after a 15 s idle gap. Do not
   drop those pool options. The pool is memoised on `globalThis` alongside the
   client so HMR does not orphan pools.
-- `ANTHROPIC_API_KEY` is **optional** — `AI_PROVIDER` (`anthropic` | `ollama` |
-  `template`) selects the backend and defaults away from Anthropic.
-  `LICHESS_API_TOKEN` must still be set in `.env.local`; both are in
-  `.env.example`. Claude's client is lazily constructed, so a missing key fails
-  the request rather than the import.
+- No AI key is required — `AI_PROVIDER` (`openai-compatible` | `anthropic` |
+  `ollama` | `template`) selects the backend, and `template` is a real
+  deterministic fallback rather than a stub. `openai-compatible` speaks OpenAI's
+  `/chat/completions` against `LLM_BASE_URL` (Groq by default, free tier), so
+  moving to Cerebras/DeepSeek/OpenAI is an env change, not a code change.
+  **`reasoning_effort` and `include_reasoning` are Groq extensions** and are
+  sent only when the host is `*.groq.com` — other hosts reject unknown fields.
+  Only `delta.content` is read from the SSE stream, never `delta.reasoning`, or
+  a reasoning model's thinking would surface in the coach panel.
+  `LICHESS_API_TOKEN` must still be set in `.env.local`; all of these are in
+  `.env.example`. Anthropic's client is lazily constructed, so a missing key
+  fails the request rather than the import.
+- **Don't run the coach off a local Ollama model.** It loses twice over: a model
+  small enough to fit is much weaker prose, and it competes with Stockfish for
+  the same cores. Measured: gemma2:2b took ~3.6 s for ~110 words, versus well
+  under a second on a hosted 120B model.
 - Report PDFs are written to `/tmp` and served by
   `/api/reports/[reportId]/download`; that path is ephemeral and per-instance,
   so the emailed attachment is the durable copy.

@@ -11,6 +11,7 @@
  * API, so profiling always needs a Lichess/Chess.com handle (see AGENTS.md).
  */
 import { buildLineFromSan } from "@/lib/engine/analysis";
+import { pristineFetch } from "@/lib/pristineFetch";
 import { redis } from "@/lib/redis";
 import type { OpponentSource, WeightedGame } from "@/lib/second/types";
 
@@ -95,7 +96,7 @@ async function fetchLichessRaw(handle: string, max: number): Promise<RawIngest> 
   const url = `https://lichess.org/api/games/user/${encodeURIComponent(
     handle,
   )}?max=${max}&opening=true&clocks=true&sort=dateDesc`;
-  const response = await fetch(url, { headers: { Accept: "application/x-ndjson" } });
+  const response = await pristineFetch(url, { headers: { Accept: "application/x-ndjson" } });
   if (!response.ok) return { games: [], ratingSummary: [] };
 
   const text = await response.text();
@@ -188,7 +189,7 @@ function sanFromPgn(pgn: string): string {
 }
 
 async function fetchChessComRaw(handle: string, max: number): Promise<RawIngest> {
-  const archivesRes = await fetch(
+  const archivesRes = await pristineFetch(
     `https://api.chess.com/pub/player/${encodeURIComponent(handle)}/games/archives`,
     { headers: { Accept: "application/json" } },
   );
@@ -201,7 +202,7 @@ async function fetchChessComRaw(handle: string, max: number): Promise<RawIngest>
 
   // archives are oldest-first; walk newest-first until we have enough.
   for (let i = archives.length - 1; i >= 0 && games.length < max; i -= 1) {
-    const monthRes = await fetch(archives[i], { headers: { Accept: "application/json" } });
+    const monthRes = await pristineFetch(archives[i], { headers: { Accept: "application/json" } });
     if (!monthRes.ok) continue;
     const { games: monthGames = [] } = (await monthRes.json()) as { games?: ChessComGame[] };
 

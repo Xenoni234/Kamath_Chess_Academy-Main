@@ -61,6 +61,14 @@ type Task = {
 
 const LINE_UPDATE_INTERVAL_MS = 120;
 
+/**
+ * Upper bound on a single bounded search. Generous — a depth-16 MultiPV-3
+ * search is normally well under a second, and the full-game scan runs many in
+ * sequence — but a search that never reports `bestmove` must not hang whatever
+ * is awaiting it.
+ */
+const SEARCH_TIMEOUT_MS = 30_000;
+
 function emptyResult(fen: string): AnalyzeResult {
   return { fen, bestMove: "", lines: [], depth: 0 };
 }
@@ -159,6 +167,20 @@ export function useStockfish(options: UseStockfishOptions = {}) {
 
   const submit = useCallback(
     (task: Task) => {
+      // A bounded search must never queue behind a pending `infinite` one.
+      //
+      // The queue is FIFO and `go infinite` only ends when something stops it.
+      // The live-eval effect re-submits an infinite task on every position
+      // change, so if one was still queued when `analyze` arrived, the pump
+      // would start THAT next and the bounded search would wait behind a search
+      // nobody was going to stop — awaiting forever. That is what left the coach
+      // panel hanging.
+      //
+      // Dropping queued infinite tasks is safe: they are only the ambient eval,
+      // they settle with an empty result that nothing reads, and the effect
+      // re-establishes the live search as soon as the board settles.
+      if (task.kind === "search") cancelQueued("infinite");
+
       queueRef.current.push(task);
       if (currentRef.current) {
         // Cut the running search short; its `bestmove` will pump the queue.
@@ -167,7 +189,7 @@ export function useStockfish(options: UseStockfishOptions = {}) {
         pump();
       }
     },
-    [post, pump],
+    [cancelQueued, post, pump],
   );
 
   useEffect(() => {
@@ -300,6 +322,26 @@ export function useStockfish(options: UseStockfishOptions = {}) {
           return;
         }
 
+        // A task settles only when its `bestmove` arrives. If the worker ever
+        // misses one — a dropped message, a search superseded at the wrong
+        // moment — the caller would await forever, and the UI that awaits it
+        // (the coach panel) spins with no error and no way out. Bound it: a
+        // late `bestmove` still settles first because `settled` guards both.
+        let settled = false;
+        const finish = (result: AnalyzeResult) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
+
+        const timer = setTimeout(() => {
+          console.warn(`[stockfish] search timed out after ${SEARCH_TIMEOUT_MS}ms`);
+          // Nudge the engine so a genuinely stuck search cannot block the queue.
+          post("stop");
+          finish(emptyResult(request.fen));
+        }, SEARCH_TIMEOUT_MS);
+
         submit({
           fen: request.fen,
           go: request.movetimeMs
@@ -307,10 +349,10 @@ export function useStockfish(options: UseStockfishOptions = {}) {
             : `go depth ${request.depth ?? 16}`,
           multipv: request.multipv ?? defaultMultipv,
           kind: "search",
-          settle: resolve,
+          settle: finish,
         });
       }),
-    [submit, defaultMultipv],
+    [submit, defaultMultipv, post],
   );
 
   /** Halt the current search and discard anything queued behind it. */
