@@ -45,6 +45,34 @@ export async function closeDriver(): Promise<void> {
   }
 }
 
+/**
+ * Drop a profile's whole subgraph.
+ *
+ * Neo4j is a separate store, so deleting the Postgres row leaves these nodes
+ * behind forever — nothing else is keyed to reclaim them. Call this whenever a
+ * profile is deleted.
+ *
+ * Returns false when the graph is not configured or the delete failed, so the
+ * caller can say so rather than reporting a clean delete. It never throws: a
+ * dossier the user asked to remove should still go, and an orphaned subgraph is
+ * inert (every query is scoped by `profileId`, and ids are cuids that are not
+ * reused).
+ */
+export async function deleteProfileGraph(profileId: string): Promise<boolean> {
+  const d = getDriver();
+  if (!d) return false;
+  const session = d.session();
+  try {
+    await session.run(`MATCH (p:Position {profileId:$pid}) DETACH DELETE p`, { pid: profileId });
+    return true;
+  } catch (error) {
+    console.error("[second] Neo4j subgraph delete failed:", error);
+    return false;
+  } finally {
+    await session.close();
+  }
+}
+
 /** Transposition key: piece placement + side + castling + en passant (no counters). */
 function positionKey(fen: string): string {
   return fen.split(/\s+/).slice(0, 4).join(" ");

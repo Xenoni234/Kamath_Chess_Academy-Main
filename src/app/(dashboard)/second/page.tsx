@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Brain, Loader2, Plus, X } from "lucide-react";
+import { Brain, Loader2, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ProfileStatus = "pending" | "processing" | "complete" | "failed";
@@ -47,8 +47,37 @@ export default function SecondPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  /** Id of the row whose delete is armed, and the one currently deleting. */
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartedAtRef = useRef<number>(0);
+
+  /**
+   * Deleting from the list matters most for **failed** dossiers: those rows are
+   * not links, so without this they could never be removed from anywhere.
+   */
+  const removeProfile = useCallback(async (profileId: string) => {
+    setListError(null);
+    setDeletingId(profileId);
+    try {
+      const response = await fetch(`/api/second/profiles/${profileId}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setListError(data.message ?? "Could not delete that dossier.");
+        return;
+      }
+      // Drop it locally rather than refetching: the poller may not be running,
+      // and a round trip to Tokyo to learn what we already know is wasteful.
+      setProfiles((current) => current.filter((entry) => entry.id !== profileId));
+    } catch {
+      setListError("Could not delete that dossier.");
+    } finally {
+      setDeletingId(null);
+      setConfirmId(null);
+    }
+  }, []);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -167,10 +196,16 @@ export default function SecondPage() {
         <div className="space-y-3">
           {profiles.map((p) => {
             const ready = p.status === "complete";
+            // A running job writes back to this row after it finishes, so
+            // deleting mid-flight would resurrect most of what we removed.
+            const busy = p.status === "pending" || p.status === "processing";
+            const armed = confirmId === p.id;
+            const deleting = deletingId === p.id;
+
             const card = (
               <div
                 className={cn(
-                  "card p-5 border border-kca-border bg-kca-surface flex items-center justify-between gap-4",
+                  "card h-full p-5 border border-kca-border bg-kca-surface flex items-center justify-between gap-4",
                   ready && "hover:border-kca-cyan/50 transition-colors",
                 )}
               >
@@ -192,12 +227,47 @@ export default function SecondPage() {
                 </span>
               </div>
             );
-            return ready ? (
-              <Link key={p.id} href={`/dashboard/second/${p.id}`} className="block">
-                {card}
-              </Link>
-            ) : (
-              <div key={p.id}>{card}</div>
+
+            // The delete button is a *sibling* of the link, never a child —
+            // a button inside an anchor is invalid and swallows the click.
+            return (
+              <div key={p.id} className="flex items-stretch gap-2">
+                {ready ? (
+                  <Link href={`/dashboard/second/${p.id}`} className="block min-w-0 flex-1">
+                    {card}
+                  </Link>
+                ) : (
+                  <div className="min-w-0 flex-1">{card}</div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => (armed ? void removeProfile(p.id) : setConfirmId(p.id))}
+                  onBlur={() => setConfirmId((current) => (current === p.id ? null : current))}
+                  disabled={busy || deleting}
+                  aria-label={armed ? `Confirm deleting ${p.handle}` : `Delete ${p.handle}`}
+                  title={
+                    busy
+                      ? "Wait for profiling to finish before deleting"
+                      : armed
+                        ? "Click again to permanently delete — this cannot be undone"
+                        : "Delete this dossier"
+                  }
+                  className={cn(
+                    "card shrink-0 border bg-kca-surface px-4 transition-colors disabled:opacity-40",
+                    armed
+                      ? "border-kca-danger/60 text-kca-danger"
+                      : "border-kca-border text-kca-gray-400 hover:border-kca-danger/40 hover:text-kca-danger",
+                  )}
+                >
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : armed ? (
+                    <span className="text-xs font-semibold whitespace-nowrap">Confirm?</span>
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             );
           })}
         </div>
