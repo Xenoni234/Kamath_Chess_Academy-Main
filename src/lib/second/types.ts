@@ -11,20 +11,151 @@ import type { PositionNode } from "@/lib/engine/analysis";
 export type OpponentSource = "LICHESS" | "CHESSCOM";
 export type Color = "white" | "black";
 
-/** A single ingested game, weighted by recency. */
+/** One online account. A dossier merges 1..5 of them into a single opponent. */
+export type AccountRef = { handle: string; source: OpponentSource };
+
+/**
+ * How a game ended, normalised across both sites.
+ *
+ * The vocabulary cannot be symmetric and should not pretend to be: Lichess
+ * collapses draw-by-agreement, repetition, fifty-move and insufficient material
+ * into a single `draw`, while Chess.com distinguishes all four. Every game
+ * therefore also carries `terminationRaw` verbatim, so no fidelity is lost and a
+ * later stage can re-map without a re-ingest.
+ */
+export type Termination =
+  | "mate"
+  | "resign"
+  | "flagged"
+  | "stalemate"
+  | "draw-agreed"
+  | "repetition"
+  | "insufficient"
+  | "fifty-move"
+  | "flag-vs-insufficient"
+  | "draw-unspecified"
+  | "abandoned"
+  | "aborted"
+  | "rules-infraction"
+  | "unknown";
+
+/** Speed bucket, normalised — Chess.com's `daily` maps onto `correspondence`. */
+export type SpeedBucket =
+  | "ultraBullet"
+  | "bullet"
+  | "blitz"
+  | "rapid"
+  | "classical"
+  | "correspondence"
+  | "unknown";
+
+/**
+ * The real time control, not the speed bucket.
+ *
+ * Every numeric field is nullable and `null` means UNKNOWN. Defaulting an
+ * unknown increment to 0 is what makes think time silently wrong, so it is not
+ * done anywhere: an unknown increment must propagate as an unknown think time.
+ */
+export type TimeControl = {
+  /** Base clock in seconds. Null for correspondence/daily, or when unstated. */
+  initialSec: number | null;
+  /** Increment in seconds. Null when the source did not state it. */
+  incrementSec: number | null;
+  /** Seconds per move — correspondence/daily only (Chess.com "1/259200"). */
+  perMoveSec: number | null;
+  speed: SpeedBucket;
+  /** Verbatim source value ("600+5", "1/86400") for auditing. */
+  raw: string | null;
+};
+
+/**
+ * A single ingested game, weighted by recency.
+ *
+ * In-memory only — never persisted — so this can change shape freely. Only
+ * `ProfileArtifact` needs backwards-compatible optionality.
+ */
 export type WeightedGame = {
   /** Which colour the opponent played in this game. */
   color: "w" | "b";
   nodes: PositionNode[];
   openingName: string;
+  eco: string | null;
   won: boolean;
   drawn: boolean;
+  /**
+   * `${source}:${gameId}` — the dedup key when several accounts are merged.
+   * Source is part of the key because a Lichess id and a Chess.com uuid live in
+   * different namespaces and could otherwise collide.
+   */
+  gameKey: string;
+  gameId: string;
+  /** Which of the profiled accounts contributed this game. */
+  account: AccountRef;
+  termination: Termination;
+  /** Lichess `status` / the losing side's Chess.com `result`, verbatim. */
+  terminationRaw: string | null;
+  timeControl: TimeControl;
+  rated: boolean | null;
+  /** The profiled player's rating in this game. */
+  playerRating: number | null;
+  opponentRating: number | null;
+  opponentHandle: string | null;
+  /**
+   * Canonical timestamp for recency: the END of the game. A game is only
+   * evidence once it has finished, and a correspondence game begun in March and
+   * finished in August is August evidence.
+   */
   playedAt: Date;
+  startedAt: Date | null;
+  endedAt: Date | null;
   /** 0..1 recency weight (halves every HALF_LIFE_DAYS). */
   weight: number;
-  /** Per-ply remaining clock in centiseconds, when the source provides it. */
+  /**
+   * Per-ply remaining clock in centiseconds, when the source provides it.
+   * Dropped entirely when it does not line up with the move list — a short or
+   * long array would otherwise shift every think time in the game by a constant
+   * ply offset, silently.
+   */
   clocks?: number[];
-  timeControl: string;
+};
+
+/** Per-account provenance, so a merged dossier can be audited rather than trusted. */
+export type ArtifactAccount = {
+  handle: string;
+  source: OpponentSource;
+  /** Returned by the API. */
+  gamesFetched: number;
+  /** Survived dedup and the total budget — what actually shaped the dossier. */
+  gamesUsed: number;
+  /** ISO. */
+  oldestPlayedAt: string | null;
+  newestPlayedAt: string | null;
+  /**
+   * Mean recency weight of this account's contribution — the number that tells
+   * you an account is stale. 1.0 = current, ~0.13 = three half-lives old.
+   */
+  meanWeight: number;
+  status: AccountIngestStatus;
+};
+
+/**
+ * `not-found` = the site returned 404; `rate-limited` = 429 after a retry.
+ * These are kept apart from `error` because an empty result and a refused
+ * request look identical downstream, and only one of them means "no games".
+ */
+export type AccountIngestStatus = "ok" | "not-found" | "rate-limited" | "error";
+
+/** Where the games went. Every drop is counted so the arithmetic can be checked. */
+export type IngestDiagnostics = {
+  totalFetched: number;
+  duplicatesDropped: number;
+  /** Games between two profiled accounts — the same human on both sides. */
+  selfPlayDropped: number;
+  noTimestampDropped: number;
+  budgetTrimmed: number;
+  clocksDiscardedMisaligned: number;
+  /** True when the run used the reduced inline-fallback budget. */
+  budgetReduced?: boolean;
 };
 
 /** One node of the opponent's opening repertoire Trie (per colour). */
@@ -110,11 +241,45 @@ export type RepertoireLine = {
 
 /** The full profiling result persisted on OpponentProfile.artifact. */
 export type ProfileArtifact = {
+  /** The primary account — always `accounts[0]` when `accounts` is present. */
   handle: string;
   source: OpponentSource;
+  /**
+   * Every merged account, with provenance. Absent on single-account dossiers
+   * generated before multi-account support — treat that as "one account,
+   * details unknown" rather than assuming anything.
+   */
+  accounts?: ArtifactAccount[];
+  /** Where the games went. Absent on dossiers generated before this existed. */
+  ingest?: IngestDiagnostics;
+  /**
+   * The newest game across all accounts, ISO — the point recency decays from.
+   * Absent on older dossiers, where each account decayed from its own newest
+   * game and a long-abandoned account could weigh as much as a live one.
+   */
+  recencyReferenceAt?: string;
+  /**
+   * Which games the think-time figures were measured on. Absent on dossiers
+   * generated before think time was increment-corrected — on those, every
+   * `avgClockSpent` is understated by the increment and is not comparable.
+   */
+  clockBasis?: {
+    initialSec: number | null;
+    gamesUsed: number;
+    gamesExcluded: number;
+  };
   colorToPlay: Color;
   gamesAnalyzed: number;
-  ratingSummary: { format: string; rating: number | null }[];
+  /**
+   * `handle`/`source` are absent on older dossiers, where entries were keyed by
+   * format alone and two accounts playing the same format collided silently.
+   */
+  ratingSummary: {
+    format: string;
+    rating: number | null;
+    handle?: string;
+    source?: OpponentSource;
+  }[];
   /** Compact top of the opponent's repertoire, deepest-weighted lines first. */
   trieSummary: { line: string[]; weightedCount: number; scorePct: number }[];
   weaknesses: WeaknessPosition[];
@@ -133,10 +298,21 @@ export type ProfileArtifact = {
 /** `not-configured` = no NEO4J_* env vars; `failed` = the stage threw. */
 export type GraphSkipReason = "not-configured" | "failed";
 
-/** BullMQ payload for a profiling run. */
+/**
+ * BullMQ payload for a profiling run.
+ *
+ * `handle`/`source` stay REQUIRED even though `accounts` supersedes them. These
+ * payloads are JSON sitting in Redis, so a deploy that lands while jobs are
+ * queued hands the worker an old-shape object. Readers use
+ * `data.accounts ?? [{ handle, source }]`, which is the one line that keeps
+ * that from being an incident.
+ */
 export type ProfileJobData = {
   profileId: string;
   requestedById: string;
+  /** Absent on jobs enqueued before multi-account support. */
+  accounts?: AccountRef[];
+  /** The primary account. */
   handle: string;
   source: OpponentSource;
   colorToPlay: Color;
