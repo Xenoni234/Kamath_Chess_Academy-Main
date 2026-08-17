@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Activity,
   ArrowLeft,
   BookOpen,
   Download,
@@ -116,10 +117,34 @@ const MOTIF_LABEL: Record<string, string> = {
   pin: "Pins",
 };
 
+type BehaviourBucket = {
+  label: string;
+  n: number;
+  accuracy: number;
+  accuracyLow: number;
+  accuracyHigh: number;
+  blunderRate: number;
+};
+
+/** Absent on dossiers generated before behavioural profiling existed. */
+type BehaviouralProfile = {
+  gamesScanned: number;
+  movesGraded: number;
+  minSamples: number;
+  clockDataAvailable: boolean;
+  timePressure: BehaviourBucket[];
+  longThink: BehaviourBucket[];
+  tilt: BehaviourBucket[];
+  structures: BehaviourBucket[];
+  lossesAnalyzed: number;
+  terminations: { termination: string; label: string; count: number; share: number }[];
+};
+
 type Artifact = {
   handle: string;
   source: string;
   tactical?: TacticalProfile;
+  behaviour?: BehaviouralProfile;
   /** Absent on older, single-account dossiers. */
   accounts?: ArtifactAccount[];
   ingest?: IngestDiagnostics;
@@ -658,6 +683,80 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             best move was that tactic. Detector precision is measured against{" "}
             {"Lichess'"}s own labelled puzzles, so a 90% figure means roughly one in ten flagged
             positions is not really that motif — read the ranges, not the single numbers.
+          </p>
+        </Section>
+      )}
+
+      {a?.behaviour && (
+        <Section title="Behavioural patterns" icon={Activity}>
+          {[
+            ...(a.behaviour.clockDataAvailable
+              ? [
+                  { heading: "As their clock runs down", buckets: a.behaviour.timePressure },
+                  { heading: "Think time", buckets: a.behaviour.longThink },
+                ]
+              : []),
+            { heading: "After their previous game", buckets: a.behaviour.tilt },
+            { heading: "By position type", buckets: a.behaviour.structures },
+          ]
+            .filter((group) => group.buckets.some((x) => x.n >= a.behaviour!.minSamples))
+            .map((group) => (
+              <div key={group.heading} className="mb-4">
+                <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                  {group.heading}
+                </div>
+                <div className="space-y-1.5">
+                  {group.buckets
+                    .filter((bucket) => bucket.n >= a.behaviour!.minSamples)
+                    .map((bucket) => (
+                      <div
+                        key={bucket.label}
+                        className="card flex flex-wrap items-baseline justify-between gap-2 border border-kca-border bg-kca-surface px-4 py-2.5"
+                      >
+                        <span className="text-sm text-kca-gray-100">{bucket.label}</span>
+                        <span className="text-sm text-kca-gray-400">
+                          <span className="text-kca-white">{bucket.accuracy.toFixed(1)}%</span>{" "}
+                          accuracy ({bucket.accuracyLow.toFixed(1)}–{bucket.accuracyHigh.toFixed(1)})
+                          · {(bucket.blunderRate * 100).toFixed(0)}% blunders · {bucket.n} moves
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ))}
+
+          {a.behaviour.terminations.length > 0 && (
+            <div className="mb-4">
+              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                How their {a.behaviour.lossesAnalyzed} losses ended
+              </div>
+              <div className="space-y-1.5">
+                {a.behaviour.terminations.map((t) => (
+                  <div
+                    key={t.termination}
+                    className="card flex items-baseline justify-between gap-2 border border-kca-border bg-kca-surface px-4 py-2.5"
+                  >
+                    <span className="text-sm text-kca-gray-100">{t.label}</span>
+                    <span className="text-sm text-kca-gray-400">
+                      <span className="text-kca-white">{(t.share * 100).toFixed(0)}%</span> ({t.count})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* The framing is not optional. These are correlations over their own
+              games; without saying so, an accuracy dip under time pressure reads
+              as a claim about what the opponent feels. */}
+          <p className="text-xs text-kca-gray-500">
+            Measured over {a.behaviour.movesGraded} of their own moves across{" "}
+            {a.behaviour.gamesScanned} games. These are patterns in how they have played, not
+            claims about what they think or feel — and a gap smaller than the ranges shown is not
+            yet a real difference. Buckets with fewer than {a.behaviour.minSamples} moves are
+            hidden rather than shown as a percentage.
+            {!a.behaviour.clockDataAvailable &&
+              " Clock-based sections are hidden: too few of these games carried usable clock data."}
           </p>
         </Section>
       )}

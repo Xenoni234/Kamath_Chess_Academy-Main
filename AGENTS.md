@@ -159,6 +159,18 @@ lives under `src/lib/second/`:
   under `MIN_OPPORTUNITIES` renders as "not enough evidence" rather than a
   percentage — a rate computed from two events is how a dossier becomes
   superstition.
+- ✅ **Behavioural profile** (`behaviour.ts`) — accuracy bucketed by clock
+  remaining (as a **fraction of base time**, never raw seconds — ten seconds is a
+  crisis in 3+2 and routine in 15+10), by long-think vs normal, by the result of
+  their previous game in that account, and by position character; plus how their
+  losses actually end. Derived from the **same** `scan.ts` pass as the tactical
+  profile — the grading is the expensive part and both need identical records,
+  so running two scans would double the cost of the most expensive stage.
+  Everything carries `n` and a 95% interval, and buckets under `MIN_SAMPLES` are
+  hidden rather than shown as a percentage. **These are correlations over their
+  own games, not psychology** — the UI and the AI prompt both say so explicitly,
+  because an accuracy dip under time pressure otherwise reads as a claim about
+  what the opponent feels.
 - ✅ **Transpositions** (`graph.ts`) — loads the Trie into **Neo4j**, MERGE-ing
   on a 4-field FEN key (no move counters) so move-orders collapse into a DAG;
   Cypher then finds bypass move-orders to weak targets. Opt-in: without
