@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Shuffle,
   Sparkles,
+  Swords,
   Target,
   Trash2,
 } from "lucide-react";
@@ -87,9 +88,38 @@ type IngestDiagnostics = {
   budgetReduced?: boolean;
 };
 
+type MotifStat = {
+  motif: string;
+  opportunities: number;
+  found: number;
+  missed: number;
+  missRate: number;
+  missRateLow: number;
+  missRateHigh: number;
+  detectorPrecision: number;
+};
+
+/** Absent on dossiers generated before tactical profiling existed. */
+type TacticalProfile = {
+  gamesScanned: number;
+  positionsScanned: number;
+  motifs: MotifStat[];
+  minOpportunities: number;
+};
+
+const MOTIF_LABEL: Record<string, string> = {
+  fork: "Forks",
+  skewer: "Skewers",
+  discoveredAttack: "Discovered attacks",
+  hangingPiece: "Loose pieces",
+  backRankMate: "Back-rank mates",
+  pin: "Pins",
+};
+
 type Artifact = {
   handle: string;
   source: string;
+  tactical?: TacticalProfile;
   /** Absent on older, single-account dossiers. */
   accounts?: ArtifactAccount[];
   ingest?: IngestDiagnostics;
@@ -578,6 +608,57 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                 : "These games carried no usable clock data, so no think-time figures are given."}
             </p>
           )}
+        </Section>
+      )}
+
+      {a?.tactical && a.tactical.motifs.length > 0 && (
+        <Section title="Tactical profile" icon={Swords}>
+          <div className="space-y-2">
+            {a.tactical.motifs.map((m) => {
+              const thin = m.opportunities < a.tactical!.minOpportunities;
+              return (
+                <div key={m.motif} className="card border border-kca-border bg-kca-surface p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm font-semibold text-kca-white">
+                      {MOTIF_LABEL[m.motif] ?? m.motif}
+                    </span>
+                    {thin ? (
+                      // Printing "50%" from two events is how a dossier becomes
+                      // superstition. Say there is not enough evidence instead.
+                      <span className="text-xs text-kca-gray-400">
+                        Not enough evidence ({m.opportunities}{" "}
+                        {m.opportunities === 1 ? "chance" : "chances"} seen)
+                      </span>
+                    ) : (
+                      <span className="text-sm">
+                        <span className="text-kca-danger">
+                          missed {m.missed} of {m.opportunities}
+                        </span>{" "}
+                        <span className="text-kca-gray-400">
+                          ({(m.missRate * 100).toFixed(0)}%)
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  {!thin && (
+                    <p className="mt-1.5 text-xs text-kca-gray-400">
+                      Executed it {m.found}{" "}
+                      {m.found === 1 ? "time" : "times"} · true rate is somewhere between{" "}
+                      {(m.missRateLow * 100).toFixed(0)}% and {(m.missRateHigh * 100).toFixed(0)}% ·
+                      this motif is detected with {(m.detectorPrecision * 100).toFixed(0)}% precision
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-kca-gray-500">
+            Measured over {a.tactical.gamesScanned} whole games ({a.tactical.positionsScanned} of
+            their own moves engine-graded). A &ldquo;chance&rdquo; is a position where Stockfish&rsquo;s
+            best move was that tactic. Detector precision is measured against{" "}
+            {"Lichess'"}s own labelled puzzles, so a 90% figure means roughly one in ten flagged
+            positions is not really that motif — read the ranges, not the single numbers.
+          </p>
         </Section>
       )}
 

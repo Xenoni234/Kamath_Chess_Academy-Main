@@ -44,6 +44,26 @@ export function renderDossierHtml(
     })
     .join("");
 
+  const MOTIF_LABEL: Record<string, string> = {
+    fork: "Forks",
+    skewer: "Skewers",
+    discoveredAttack: "Discovered attacks",
+    hangingPiece: "Loose pieces",
+    backRankMate: "Back-rank mates",
+    pin: "Pins",
+  };
+
+  const tacticalRows = (artifact.tactical?.motifs ?? [])
+    .map((m) => {
+      const thin = m.opportunities < (artifact.tactical?.minOpportunities ?? 6);
+      const label = htmlEscape(MOTIF_LABEL[m.motif] ?? m.motif);
+      if (thin) {
+        return `<tr><td>${label}</td><td colspan="3" class="muted">Not enough evidence (${m.opportunities} seen)</td><td>${(m.detectorPrecision * 100).toFixed(0)}%</td></tr>`;
+      }
+      return `<tr><td>${label}</td><td>${m.missed} / ${m.opportunities}</td><td>${(m.missRate * 100).toFixed(0)}%</td><td>${(m.missRateLow * 100).toFixed(0)}–${(m.missRateHigh * 100).toFixed(0)}%</td><td>${(m.detectorPrecision * 100).toFixed(0)}%</td></tr>`;
+    })
+    .join("");
+
   const weaknessRows =
     artifact.weaknesses
       .map(
@@ -164,6 +184,17 @@ export function renderDossierHtml(
     <tbody>${sourceRows}</tbody>
   </table>
   <p class="muted">Recency is the mean weight of that account's games — 1.00 is current, below 0.25 means most of its games are over a year old and barely shaped this dossier.</p>`
+      : ""
+  }
+
+  ${
+    tacticalRows
+      ? `<h2>Tactical profile</h2>
+  <table>
+    <thead><tr><th>Motif</th><th>Missed</th><th>Rate</th><th>95% range</th><th>Detector</th></tr></thead>
+    <tbody>${tacticalRows}</tbody>
+  </table>
+  <p class="muted">Measured over ${artifact.tactical?.gamesScanned ?? 0} whole games (${artifact.tactical?.positionsScanned ?? 0} of their own moves engine-graded). A chance is a position where Stockfish's best move was that tactic. "Detector" is the motif classifier's precision against Lichess's own labelled puzzles — read the 95% range, not the single rate.</p>`
       : ""
   }
 

@@ -101,6 +101,19 @@ export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLin
     )
     .join("\n");
 
+  // Only motifs with a usable sample reach the model, and each carries its
+  // denominator plus the detector's own accuracy — the prompt below forbids
+  // inventing figures, so it must be given honest ones to work from.
+  const tactical = artifact.tactical
+    ? artifact.tactical.motifs
+        .filter((m) => m.opportunities >= artifact.tactical!.minOpportunities)
+        .map(
+          (m) =>
+            `- ${m.motif}: missed ${m.missed} of ${m.opportunities} chances (${(m.missRate * 100).toFixed(0)}%, 95% CI ${(m.missRateLow * 100).toFixed(0)}-${(m.missRateHigh * 100).toFixed(0)}%), executed ${m.found}. Detector precision ${(m.detectorPrecision * 100).toFixed(0)}%.`,
+        )
+        .join("\n")
+    : "";
+
   const transpositions = artifact.transpositions
     .slice(0, 3)
     .map((t) => `- ${t.bypass.join(" ")} (instead of their usual ${t.mainLine.join(" ")})`)
@@ -137,6 +150,9 @@ ${artifact.trieSummary
 
 Their weakest recurring positions (Stockfish-graded):
 ${weaknesses || "- none clearly identified"}
+
+Tactical profile (from ${artifact.tactical?.gamesScanned ?? 0} whole games, ${artifact.tactical?.positionsScanned ?? 0} of their own moves engine-graded). Only motifs with enough evidence are listed; treat a wide confidence interval as "not yet known" rather than a finding, and never quote a rate without its sample size:
+${tactical || "- not enough evidence to report any tactical pattern"}
 
 Mined novelties (engine-strong, human-rare):
 ${novelties || "- none found"}

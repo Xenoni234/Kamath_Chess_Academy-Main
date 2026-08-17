@@ -281,6 +281,7 @@ function hydrateGames(
     games.push({
       color: game.color,
       nodes,
+      san: game.san,
       openingName: game.openingName,
       eco: game.eco,
       won: game.won,
