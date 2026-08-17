@@ -298,6 +298,8 @@ export type ProfileArtifact = {
   novelties: Novelty[];
   /** Absent on dossiers generated before tactical profiling existed. */
   tactical?: TacticalProfile;
+  /** Absent on dossiers generated before behavioural profiling existed. */
+  behaviour?: BehaviouralProfile;
   /** True when Neo4j was available and the transposition pass ran. */
   graphUsed: boolean;
   /**
@@ -335,6 +337,54 @@ export type MotifStat = {
    * puzzle labels. Shown to the user so the claim carries its own error bar.
    */
   detectorPrecision: number;
+};
+
+/**
+ * One measured slice of their play. `n` is always present because a bucketed
+ * accuracy without its sample size is the easiest way for a dossier to mislead.
+ */
+export type BehaviourBucket = {
+  label: string;
+  n: number;
+  /** Mean accuracy 0..100, with a 95% interval on the mean. */
+  accuracy: number;
+  accuracyLow: number;
+  accuracyHigh: number;
+  /** Share of moves in this bucket losing 300cp or more. */
+  blunderRate: number;
+};
+
+/**
+ * Behavioural profile. Absent on dossiers generated before it existed.
+ *
+ * Every field is a correlation over their own games, not a psychological claim —
+ * the UI is responsible for saying so.
+ */
+export type BehaviouralProfile = {
+  gamesScanned: number;
+  movesGraded: number;
+  /** Buckets below this many samples must render as insufficient evidence. */
+  minSamples: number;
+  /** False when too few games carried usable clocks; hides the clock sections. */
+  clockDataAvailable: boolean;
+  /** Accuracy as a fraction of their base clock runs down. */
+  timePressure: BehaviourBucket[];
+  /** Accuracy after an unusually long think, versus a normal one. */
+  longThink: BehaviourBucket[];
+  /** Accuracy in the game following a win versus following a loss. */
+  tilt: BehaviourBucket[];
+  /** Accuracy by position character, worst first. */
+  structures: BehaviourBucket[];
+  lossesAnalyzed: number;
+  /** How their losses end. Empty when there were too few losses to be useful. */
+  terminations: {
+    termination: string;
+    label: string;
+    count: number;
+    share: number;
+    shareLow: number;
+    shareHigh: number;
+  }[];
 };
 
 /** Absent on dossiers generated before tactical profiling existed. */

@@ -64,6 +64,29 @@ export function renderDossierHtml(
     })
     .join("");
 
+  const behaviour = artifact.behaviour;
+  const behaviourRows = behaviour
+    ? [
+        ...(behaviour.clockDataAvailable
+          ? [...behaviour.timePressure, ...behaviour.longThink]
+          : []),
+        ...behaviour.tilt,
+        ...behaviour.structures,
+      ]
+        .filter((bucket) => bucket.n >= behaviour.minSamples)
+        .map(
+          (bucket) =>
+            `<tr><td>${htmlEscape(bucket.label)}</td><td>${bucket.accuracy.toFixed(1)}%</td><td>${bucket.accuracyLow.toFixed(1)}–${bucket.accuracyHigh.toFixed(1)}%</td><td>${(bucket.blunderRate * 100).toFixed(0)}%</td><td>${bucket.n}</td></tr>`,
+        )
+        .concat(
+          behaviour.terminations.map(
+            (t) =>
+              `<tr><td>Losses ending: ${htmlEscape(t.label)}</td><td colspan="3" class="muted">${(t.share * 100).toFixed(0)}% of ${behaviour.lossesAnalyzed} losses</td><td>${t.count}</td></tr>`,
+          ),
+        )
+        .join("")
+    : "";
+
   const weaknessRows =
     artifact.weaknesses
       .map(
@@ -195,6 +218,17 @@ export function renderDossierHtml(
     <tbody>${tacticalRows}</tbody>
   </table>
   <p class="muted">Measured over ${artifact.tactical?.gamesScanned ?? 0} whole games (${artifact.tactical?.positionsScanned ?? 0} of their own moves engine-graded). A chance is a position where Stockfish's best move was that tactic. "Detector" is the motif classifier's precision against Lichess's own labelled puzzles — read the 95% range, not the single rate.</p>`
+      : ""
+  }
+
+  ${
+    behaviourRows
+      ? `<h2>Behavioural patterns</h2>
+  <table>
+    <thead><tr><th>Situation</th><th>Accuracy</th><th>95% range</th><th>Blunders</th><th>Moves</th></tr></thead>
+    <tbody>${behaviourRows}</tbody>
+  </table>
+  <p class="muted">Measured over ${artifact.behaviour?.movesGraded ?? 0} of their own moves across ${artifact.behaviour?.gamesScanned ?? 0} games. These are patterns in how they have played, not claims about what they think or feel — a gap smaller than the ranges shown is not yet a real difference. Buckets under ${artifact.behaviour?.minSamples ?? 25} moves are omitted.</p>`
       : ""
   }
 

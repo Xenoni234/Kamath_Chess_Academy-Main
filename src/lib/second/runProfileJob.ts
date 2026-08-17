@@ -7,7 +7,9 @@ import { queueEnabled } from "@/lib/queue/connection";
 import { fetchOpponentGamesMulti } from "@/lib/second/ingest";
 import { buildTrie, flattenTrie, trieSummaryLines } from "@/lib/second/trie";
 import { detectWeaknesses } from "@/lib/second/weakness";
+import { scanGames } from "@/lib/second/scan";
 import { profileTactics } from "@/lib/second/tactics";
+import { profileBehaviour } from "@/lib/second/behaviour";
 import { runGraphStage } from "@/lib/second/graph";
 import { mineNovelties, type NoveltyTarget } from "@/lib/second/novelty";
 import { buildRepertoireLines, describeArtifact } from "@/lib/second/repertoire";
@@ -214,19 +216,27 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
 
     timer.mark("weakness+novelty");
 
-    // 4b. Tactical profile. Runs on its own after the pair above rather than
-    // beside them: it saturates the engine pool by itself, so overlapping it
-    // would only make all three slower. Degrades to undefined rather than
-    // throwing — a scan failure costs one section, not the dossier.
+    // 4b. Whole-game scan, then the two profiles derived from it. One engine
+    // pass serves both: the grading is the expensive part and they need the
+    // same records, so running it twice would double the cost of the most
+    // expensive stage for nothing. Runs after the pair above rather than beside
+    // them because it saturates the engine pool on its own.
+    //
+    // Degrades to undefined rather than throwing — a scan failure costs two
+    // sections, not the dossier.
     let tactical;
+    let behaviour;
     try {
-      tactical = await profileTactics(games, theirColor);
+      const scan = await scanGames(games, theirColor);
+      tactical = profileTactics(scan.moves, scan.games.length);
+      behaviour = profileBehaviour(scan.games, scan.moves);
     } catch (error) {
-      console.error("[second] tactical scan failed:", error);
+      console.error("[second] whole-game scan failed:", error);
       tactical = undefined;
+      behaviour = undefined;
     }
 
-    timer.mark("tactical scan");
+    timer.mark("tactical+behavioural scan");
 
     // 5. Transpositions (Neo4j; skipped when not configured). This genuinely
     // needs the weaknesses, so it cannot join the pair above.
@@ -254,6 +264,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
       transpositions,
       novelties,
       tactical,
+      behaviour,
       graphUsed,
       graphSkipReason,
     };

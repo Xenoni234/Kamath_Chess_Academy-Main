@@ -114,6 +114,34 @@ export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLin
         .join("\n")
     : "";
 
+  // Only buckets with a usable sample reach the model, each with its `n`. The
+  // framing line matters as much as the numbers: without it the model writes
+  // psychology ("they panic") from what is only a correlation.
+  const b = artifact.behaviour;
+  const bucketLine = (bucket: { label: string; n: number; accuracy: number; blunderRate: number }) =>
+    `- ${bucket.label}: ${bucket.accuracy.toFixed(1)}% accuracy over ${bucket.n} moves, ${(bucket.blunderRate * 100).toFixed(0)}% of them blunders`;
+  const behaviourBlocks = b
+    ? [
+        b.clockDataAvailable && b.timePressure.length
+          ? `Clock:\n${b.timePressure.filter((x) => x.n >= b.minSamples).map(bucketLine).join("\n")}`
+          : "",
+        b.clockDataAvailable && b.longThink.length
+          ? `Think time:\n${b.longThink.filter((x) => x.n >= b.minSamples).map(bucketLine).join("\n")}`
+          : "",
+        b.tilt.length
+          ? `After a previous result:\n${b.tilt.filter((x) => x.n >= b.minSamples).map(bucketLine).join("\n")}`
+          : "",
+        b.structures.length
+          ? `Position type:\n${b.structures.filter((x) => x.n >= b.minSamples).map(bucketLine).join("\n")}`
+          : "",
+        b.terminations.length
+          ? `How their ${b.lossesAnalyzed} losses ended:\n${b.terminations.map((t) => `- ${t.label}: ${t.count} (${(t.share * 100).toFixed(0)}%)`).join("\n")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+
   const transpositions = artifact.transpositions
     .slice(0, 3)
     .map((t) => `- ${t.bypass.join(" ")} (instead of their usual ${t.mainLine.join(" ")})`)
@@ -153,6 +181,9 @@ ${weaknesses || "- none clearly identified"}
 
 Tactical profile (from ${artifact.tactical?.gamesScanned ?? 0} whole games, ${artifact.tactical?.positionsScanned ?? 0} of their own moves engine-graded). Only motifs with enough evidence are listed; treat a wide confidence interval as "not yet known" rather than a finding, and never quote a rate without its sample size:
 ${tactical || "- not enough evidence to report any tactical pattern"}
+
+Behavioural patterns (${artifact.behaviour?.movesGraded ?? 0} of their moves across ${artifact.behaviour?.gamesScanned ?? 0} games). These are CORRELATIONS over their own games, not psychology: describe what the numbers show and never assert what they feel or intend. Quote sample sizes. Where a comparison is small or the gap narrow, say it is not yet meaningful:
+${behaviourBlocks || "- not enough evidence to report any behavioural pattern"}
 
 Mined novelties (engine-strong, human-rare):
 ${novelties || "- none found"}
