@@ -40,26 +40,115 @@ type PositionAgg = {
   clockSamples: number[];
 };
 
-/** Centiseconds the mover spent on the ply (prev same-side remaining − current). */
-function clockSpentCs(clocks: number[] | undefined, ply: number): number | null {
+/**
+ * Centiseconds the mover actually spent on this ply.
+ *
+ * Clocks are REMAINING time, so the naive `prev − curr` under-reports think time
+ * by exactly the increment on every increment game, and goes negative (and was
+ * discarded as null) whenever the increment exceeded the time spent. Adding the
+ * increment back is the whole correction.
+ *
+ * Returns null rather than a guess whenever the answer is unknowable — most
+ * importantly when the increment itself is unknown. An unknown increment must
+ * propagate as an unknown think time; assuming zero is what made every
+ * clock-derived figure in the dossier quietly wrong.
+ */
+function clockSpentCs(game: WeightedGame, ply: number): number | null {
+  const clocks = game.clocks;
   if (!clocks || ply < 3) return null;
+
+  const { incrementSec, initialSec } = game.timeControl;
+  if (incrementSec === null) return null;
+
   const prev = clocks[ply - 3];
   const curr = clocks[ply - 1];
   if (prev === undefined || curr === undefined) return null;
-  const spent = prev - curr;
-  return spent >= 0 ? spent : null;
+
+  const spent = prev - curr + incrementSec * 100;
+  if (spent < 0) return null;
+  // Longer than the whole base clock means the arrays are lying, not that they
+  // thought for twelve minutes in a 3+2.
+  if (initialSec !== null && spent > initialSec * 100) return null;
+  return spent;
+}
+
+/**
+ * Which games' clocks a dossier's think-time figures were measured on.
+ *
+ * Merging accounts makes this necessary: averaging a 1+0 bullet account with a
+ * 15+10 rapid account produces a number that describes neither. Eight seconds is
+ * a catastrophe in bullet and instant in rapid.
+ */
+export type ClockBasis = {
+  /** Modal base clock in seconds; null when no game had usable clock data. */
+  initialSec: number | null;
+  gamesUsed: number;
+  gamesExcluded: number;
+};
+
+/** Widest ratio to the modal base clock still counted as the same class. */
+const CLOCK_BUCKET_RATIO = 4;
+
+/**
+ * Pick the base clock the dossier's think times will be measured on: the modal
+ * `initialSec` by recency weight, so the figure describes the time control they
+ * actually play rather than whichever account happened to have more games.
+ */
+function modalInitialSec(games: WeightedGame[], color: "w" | "b"): number | null {
+  const weightByInitial = new Map<number, number>();
+  for (const game of games) {
+    if (game.color !== color || !game.clocks) continue;
+    const { initialSec, incrementSec, speed } = game.timeControl;
+    if (initialSec === null || incrementSec === null || speed === "correspondence") continue;
+    weightByInitial.set(initialSec, (weightByInitial.get(initialSec) ?? 0) + game.weight);
+  }
+  let best: number | null = null;
+  let bestWeight = 0;
+  for (const [initial, weight] of weightByInitial) {
+    if (weight > bestWeight) {
+      best = initial;
+      bestWeight = weight;
+    }
+  }
+  return best;
 }
 
 export async function detectWeaknesses(
   games: WeightedGame[],
   color: "w" | "b",
   budget: WeaknessBudget = DEFAULT_BUDGET,
-): Promise<WeaknessPosition[]> {
+): Promise<{ weaknesses: WeaknessPosition[]; clockBasis: ClockBasis }> {
+  // 0. Decide which time control the think-time figures describe, and count what
+  //    that decision excludes so the UI can state the basis rather than imply
+  //    the numbers cover every game.
+  const basisInitialSec = modalInitialSec(games, color);
+  const clockBasis: ClockBasis = {
+    initialSec: basisInitialSec,
+    gamesUsed: 0,
+    gamesExcluded: 0,
+  };
+
+  const clocksUsable = (game: WeightedGame): boolean => {
+    if (!game.clocks) return false;
+    const { initialSec, incrementSec, speed } = game.timeControl;
+    if (incrementSec === null || speed === "correspondence") return false;
+    if (basisInitialSec === null || initialSec === null) return false;
+    return (
+      initialSec <= basisInitialSec * CLOCK_BUCKET_RATIO &&
+      initialSec * CLOCK_BUCKET_RATIO >= basisInitialSec
+    );
+  };
+
   // 1. Aggregate the opponent's recurring decision positions.
   const positions = new Map<string, PositionAgg>();
 
   for (const game of games) {
     if (game.color !== color) continue;
+    const useClocks = clocksUsable(game);
+    if (game.clocks) {
+      if (useClocks) clockBasis.gamesUsed += 1;
+      else clockBasis.gamesExcluded += 1;
+    }
     const path: string[] = [];
     const limit = Math.min(game.nodes.length, MAX_PLY);
     for (let i = 0; i < limit; i += 1) {
@@ -80,7 +169,7 @@ export async function detectWeaknesses(
       agg.moves.set(node.san, mv);
       agg.totalWeight += game.weight;
 
-      const spent = clockSpentCs(game.clocks, node.ply);
+      const spent = useClocks ? clockSpentCs(game, node.ply) : null;
       if (spent !== null) agg.clockSamples.push(spent);
 
       path.push(node.san);
@@ -93,7 +182,7 @@ export async function detectWeaknesses(
     .sort((a, b) => b.totalWeight - a.totalWeight)
     .slice(0, MAX_POSITIONS);
 
-  if (ranked.length === 0) return [];
+  if (ranked.length === 0) return { weaknesses: [], clockBasis };
 
   const fens: string[] = [];
   const slots = ranked.map((agg) => {
@@ -140,7 +229,10 @@ export async function detectWeaknesses(
     });
   }
 
-  return results.sort((a, b) => b.weaknessScore - a.weaknessScore).slice(0, 8);
+  return {
+    weaknesses: results.sort((a, b) => b.weaknessScore - a.weaknessScore).slice(0, 8),
+    clockBasis,
+  };
 }
 
 /** Reachable-from-start check for a SAN line — used to validate reconstructed lines. */

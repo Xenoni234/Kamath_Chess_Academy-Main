@@ -3,7 +3,8 @@ import path from "node:path";
 import { db } from "@/lib/db";
 import { generateOpponentRepertoire } from "@/lib/claude";
 import { createNotification } from "@/lib/notify";
-import { fetchOpponentGames } from "@/lib/second/ingest";
+import { queueEnabled } from "@/lib/queue/connection";
+import { fetchOpponentGamesMulti } from "@/lib/second/ingest";
 import { buildTrie, flattenTrie, trieSummaryLines } from "@/lib/second/trie";
 import { detectWeaknesses } from "@/lib/second/weakness";
 import { runGraphStage } from "@/lib/second/graph";
@@ -24,10 +25,29 @@ import type { ProfileArtifact, ProfileJobData } from "@/lib/second/types";
  * a missing Neo4j or Lichess token costs one section, not the dossier.
  */
 
-/** How many of the opponent's games to pull. */
-const MAX_GAMES = 200;
+/** How many games to pull per account. */
+const PER_ACCOUNT_MAX = 200;
+/** Ceiling across all merged accounts. */
+const TOTAL_MAX = 1000;
+/**
+ * Ceiling when the job is running INLINE in the Next process (no queue Redis).
+ * Reducing beats refusing — dev depends on the inline path — but a silently
+ * smaller dossier is exactly the untrustworthiness this stage exists to remove,
+ * so the reduction is flagged on the artifact and rendered.
+ */
+const INLINE_TOTAL_MAX = 400;
 /** Cap the positions handed to the (expensive) novelty miner. */
 const MAX_NOVELTY_TARGETS = 8;
+
+/**
+ * Ingest gets its own bound, well inside the job ceiling.
+ *
+ * Five accounts, one of them behind a wedged connection, must not consume the
+ * whole run. On timeout the pipeline continues with whatever arrived: a dossier
+ * built from three of five accounts that *says so* beats a 30-minute wall
+ * followed by `status: failed`.
+ */
+const INGEST_TIMEOUT_MS = 6 * 60 * 1000;
 
 /**
  * Ceiling on a whole profiling run.
@@ -82,20 +102,56 @@ function stageTimer() {
 
 async function runProfileJobInner(data: ProfileJobData): Promise<void> {
   const { profileId, requestedById, handle, source, colorToPlay } = data;
+  // Jobs enqueued before multi-account support carry only handle/source, and
+  // those payloads are JSON sitting in Redis — a deploy landing while jobs are
+  // queued must not crash the worker.
+  const accounts = data.accounts?.length ? data.accounts : [{ handle, source }];
   const timer = stageTimer();
 
   try {
     await db.opponentProfile.update({ where: { id: profileId }, data: { status: "processing" } });
 
-    // 1. Ingest their games, recency-weighted.
-    const { games, ratingSummary } = await fetchOpponentGames(handle, source, { max: MAX_GAMES });
+    // 1. Ingest their games across every account, merged and recency-weighted.
+    const inline = !queueEnabled();
+    const ingestAbort = new AbortController();
+    const ingestTimer = setTimeout(() => ingestAbort.abort(), INGEST_TIMEOUT_MS);
+    let merged;
+    try {
+      merged = await fetchOpponentGamesMulti(accounts, {
+        perAccountMax: PER_ACCOUNT_MAX,
+        totalMax: inline ? INLINE_TOTAL_MAX : TOTAL_MAX,
+        signal: ingestAbort.signal,
+      });
+    } finally {
+      clearTimeout(ingestTimer);
+    }
+    const { games, ratingSummary } = merged;
+    const ingestDiagnostics = {
+      ...merged.diagnostics,
+      ...(inline ? { budgetReduced: true } : {}),
+    };
+
     if (games.length === 0) {
+      // Name the accounts and why each produced nothing — "no games found" over
+      // a rate-limited account sends you checking a username that was fine.
+      const detail = merged.accounts
+        .map((a) => {
+          const reason =
+            a.status === "not-found"
+              ? "not found"
+              : a.status === "rate-limited"
+                ? "rate-limited by the site"
+                : a.status === "error"
+                  ? "could not be reached"
+                  : "returned no games";
+          return `${a.handle} (${a.source === "LICHESS" ? "Lichess" : "Chess.com"}): ${reason}`;
+        })
+        .join("; ");
       await db.opponentProfile.update({
         where: { id: profileId },
         data: {
           status: "failed",
-          summary:
-            "No games found for that account. Check the username, the site, and that the profile is public.",
+          summary: `No games found. ${detail}. Check the usernames, the sites, and that the profiles are public.`,
         },
       });
       return;
@@ -109,7 +165,9 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
         where: { id: profileId },
         data: {
           status: "failed",
-          summary: `No games found where ${handle} played ${theirColor === "w" ? "White" : "Black"}. Try preparing for the other colour.`,
+          summary: `No games found where ${accounts.map((a) => a.handle).join(" / ")} played ${
+            theirColor === "w" ? "White" : "Black"
+          }. Try preparing for the other colour.`,
         },
       });
       return;
@@ -148,7 +206,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
     // 4. Weaknesses and novelties are fully independent of each other — one
     // reads the games, the other the trie — so they run concurrently instead of
     // back to back. Each uses its own engine.
-    const [weaknesses, novelties] = await Promise.all([
+    const [{ weaknesses, clockBasis }, novelties] = await Promise.all([
       detectWeaknesses(games, theirColor),
       mineNovelties(targets),
     ]);
@@ -169,6 +227,10 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
     const artifact: ProfileArtifact = {
       handle,
       source,
+      accounts: merged.accounts,
+      ingest: ingestDiagnostics,
+      recencyReferenceAt: new Date(merged.recencyReferenceMs).toISOString(),
+      clockBasis,
       colorToPlay,
       gamesAnalyzed: theirGames.length,
       ratingSummary,
@@ -217,7 +279,9 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
 
     // 7. Narrative (Claude / Ollama / template — never throws).
     const narrative = await generateOpponentRepertoire({
-      handle,
+      // The AI layer takes one label. Say plainly that it describes a human
+      // across several accounts, or the prose talks about a single username.
+      handle: accounts.length > 1 ? `${handle} (+${accounts.length - 1} more accounts)` : handle,
       colorToPlay,
       gamesAnalyzed: theirGames.length,
       description,
