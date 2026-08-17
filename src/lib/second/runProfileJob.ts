@@ -7,6 +7,7 @@ import { queueEnabled } from "@/lib/queue/connection";
 import { fetchOpponentGamesMulti } from "@/lib/second/ingest";
 import { buildTrie, flattenTrie, trieSummaryLines } from "@/lib/second/trie";
 import { detectWeaknesses } from "@/lib/second/weakness";
+import { profileTactics } from "@/lib/second/tactics";
 import { runGraphStage } from "@/lib/second/graph";
 import { mineNovelties, type NoveltyTarget } from "@/lib/second/novelty";
 import { buildRepertoireLines, describeArtifact } from "@/lib/second/repertoire";
@@ -213,6 +214,20 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
 
     timer.mark("weakness+novelty");
 
+    // 4b. Tactical profile. Runs on its own after the pair above rather than
+    // beside them: it saturates the engine pool by itself, so overlapping it
+    // would only make all three slower. Degrades to undefined rather than
+    // throwing — a scan failure costs one section, not the dossier.
+    let tactical;
+    try {
+      tactical = await profileTactics(games, theirColor);
+    } catch (error) {
+      console.error("[second] tactical scan failed:", error);
+      tactical = undefined;
+    }
+
+    timer.mark("tactical scan");
+
     // 5. Transpositions (Neo4j; skipped when not configured). This genuinely
     // needs the weaknesses, so it cannot join the pair above.
     const { transpositions, graphUsed, graphSkipReason } = await runGraphStage(
@@ -238,6 +253,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
       weaknesses,
       transpositions,
       novelties,
+      tactical,
       graphUsed,
       graphSkipReason,
     };

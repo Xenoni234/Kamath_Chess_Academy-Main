@@ -77,7 +77,18 @@ export type TimeControl = {
 export type WeightedGame = {
   /** Which colour the opponent played in this game. */
   color: "w" | "b";
+  /**
+   * Position tree, truncated to HYDRATE_MAX_PLY — deep enough for the
+   * repertoire stages and a fraction of the memory of a full game at 1000
+   * games.
+   */
   nodes: PositionNode[];
+  /**
+   * The complete move list, untruncated. Kept as a string because it costs
+   * ~200 bytes against ~12 KB for a full node tree: stages that genuinely need
+   * whole games (the tactical scan) rebuild only the games they scan.
+   */
+  san: string;
   openingName: string;
   eco: string | null;
   won: boolean;
@@ -285,6 +296,8 @@ export type ProfileArtifact = {
   weaknesses: WeaknessPosition[];
   transpositions: TranspositionLine[];
   novelties: Novelty[];
+  /** Absent on dossiers generated before tactical profiling existed. */
+  tactical?: TacticalProfile;
   /** True when Neo4j was available and the transposition pass ran. */
   graphUsed: boolean;
   /**
@@ -297,6 +310,42 @@ export type ProfileArtifact = {
 
 /** `not-configured` = no NEO4J_* env vars; `failed` = the stage threw. */
 export type GraphSkipReason = "not-configured" | "failed";
+
+/**
+ * How often the opponent finds or misses one tactical motif.
+ *
+ * `missRate` is always accompanied by its denominator and interval. A rate
+ * without them invites "they miss 50% of forks" when the truth was one miss out
+ * of two — the interval makes that unusable-looking, which is correct.
+ */
+export type MotifStat = {
+  motif: string;
+  /** Positions where the engine's best move executed this motif. */
+  opportunities: number;
+  /** They played a move executing it. */
+  found: number;
+  /** They had it, played something else, and lost material or position by it. */
+  missed: number;
+  missRate: number;
+  /** 95% Wilson bounds on `missRate`. */
+  missRateLow: number;
+  missRateHigh: number;
+  /**
+   * Measured precision of the detector for this motif, against Lichess's own
+   * puzzle labels. Shown to the user so the claim carries its own error bar.
+   */
+  detectorPrecision: number;
+};
+
+/** Absent on dossiers generated before tactical profiling existed. */
+export type TacticalProfile = {
+  gamesScanned: number;
+  /** Their own moves the engine actually graded. */
+  positionsScanned: number;
+  motifs: MotifStat[];
+  /** Motifs below this many opportunities are reported as insufficient data. */
+  minOpportunities: number;
+};
 
 /**
  * BullMQ payload for a profiling run.

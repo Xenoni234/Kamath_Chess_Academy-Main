@@ -138,6 +138,27 @@ lives under `src/lib/second/`:
   `artifact.clockBasis` records which games the figures came from.
   **Dossiers generated before this are not comparable** — their `avgClockSpent`
   is understated by the increment, and `clockBasis` is absent.
+- ✅ **Tactical profile** (`tactics.ts` + `lib/tactics/motifs.ts`) — engine-grades
+  their own moves across **whole games** (`weakness.ts` only covers plies 5–20,
+  the opening, where tactics are rarest) and classifies which motif Stockfish's
+  preferred move exploited. Two-pass: depth 12 over the scan window, then
+  depth 18 only where their move differed from the engine's, because a depth-12
+  "best move" is not solid enough to accuse someone of missing a tactic.
+  **`TACTICAL_SCAN_MAX_GAMES` is deliberately separate from the ingest budget** —
+  this is the only stage whose cost scales with game count (~65 positions per
+  game), so ingest breadth and tactical depth are tuned independently.
+  **The detector's accuracy is measured, not asserted.** `scripts/validateMotifs.ts`
+  scores it against the ~500k Lichess puzzles already in the `Puzzle` table,
+  using their own `themes[]` as ground truth, and judges each motif on the 95%
+  lower bound of precision. Only motifs in `SHIPPABLE_MOTIFS` reach a dossier:
+  fork, skewer, discoveredAttack, hangingPiece, backRankMate. **`pin` is
+  excluded at 76.9% precision** — restoring it means improving the detector and
+  re-measuring, never lowering the bar. `MOTIF_PRECISION` is quoted to the user,
+  so **re-run the harness and update it whenever the detector changes**.
+  Every rate ships with its denominator and a Wilson interval, and anything
+  under `MIN_OPPORTUNITIES` renders as "not enough evidence" rather than a
+  percentage — a rate computed from two events is how a dossier becomes
+  superstition.
 - ✅ **Transpositions** (`graph.ts`) — loads the Trie into **Neo4j**, MERGE-ing
   on a 4-field FEN key (no move counters) so move-orders collapse into a DAG;
   Cypher then finds bypass move-orders to weak targets. Opt-in: without
