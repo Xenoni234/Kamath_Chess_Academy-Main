@@ -10,7 +10,7 @@
  * (the opening, where tactics are rarest) and aggregates by position rather than
  * keeping per-move records.
  */
-import { analyzePositions } from "@/lib/engine/serverEngine";
+import { ENGINE_CONCURRENCY, mapWithEngines } from "@/lib/engine/serverEngine";
 import { buildLineFromSan } from "@/lib/engine/analysis";
 import { moveAccuracy, scoreToCentipawns, winPercent } from "@/lib/engine/classify";
 import type { WeightedGame } from "@/lib/second/types";
@@ -28,8 +28,20 @@ const MIN_PLY = 16;
 /** Guard the position budget against a handful of enormous games. */
 const MAX_PLY = 120;
 
-const SHALLOW = { depth: 12, threads: 1, totalTimeoutMs: 10 * 60 * 1000 };
-const DEEP = { depth: 18, threads: 1, totalTimeoutMs: 6 * 60 * 1000 };
+const SHALLOW_DEPTH = 12;
+const DEEP_DEPTH = 18;
+
+/**
+ * Both passes run across the engine POOL, not a single engine.
+ *
+ * `analyzePositions` is a sequential loop on one engine — fine for the 60-odd
+ * positions weakness.ts grades, badly wrong here. Measured on 15 games: 1152
+ * positions took 68s single-engine, against a per-position cost that implies
+ * roughly 8x that throughput across the pool. `extend.ts` already uses
+ * `mapWithEngines` for exactly this reason.
+ */
+const SHALLOW_TIMEOUT_MS = 10 * 60 * 1000;
+const DEEP_TIMEOUT_MS = 6 * 60 * 1000;
 
 /** A single graded move by the opponent. */
 export type GradedMove = {
@@ -99,13 +111,13 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
     gameIndex: number;
     ply: number;
     fenBefore: string;
+    fenAfter: string;
     theirUci: string;
     thinkCs: number | null;
     remainingBeforeCs: number | null;
   };
 
   const pending: Pending[] = [];
-  const fens: string[] = [];
 
   for (let g = 0; g < scanned.length; g += 1) {
     const game = scanned[g];
@@ -120,14 +132,14 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
         gameIndex: g,
         ply: node.ply,
         fenBefore: node.fenBefore,
+        // BOTH sides of the move. Using the next of their own moves as the
+        // "after" position would span their move AND the opponent's reply, and
+        // report the pair's combined cost as theirs.
+        fenAfter: node.fen,
         theirUci: node.uci,
         thinkCs: thinkCsAt(game, node.ply),
         remainingBeforeCs: remainingBeforeCs(game, node.ply),
       });
-      // BOTH sides of the move. Using the next of their own moves as the "after"
-      // position would span their move AND the opponent's reply, and report the
-      // pair's combined cost as theirs.
-      fens.push(node.fenBefore, node.fen);
     }
   }
 
@@ -135,24 +147,35 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
     return { games: scanned, moves: [], positionsEvaluated: 0 };
   }
 
-  const scores = await analyzePositions(fens, SHALLOW);
+  // One pool worker per move, searching both sides of it, so the pair always
+  // lands on the same engine and reuses its transposition table.
+  const scores = await mapWithEngines(
+    pending,
+    async (item, search) => ({
+      before: await search(item.fenBefore, SHALLOW_DEPTH),
+      after: await search(item.fenAfter, SHALLOW_DEPTH),
+    }),
+    {
+      concurrency: ENGINE_CONCURRENCY,
+      threads: 1,
+      totalTimeoutMs: SHALLOW_TIMEOUT_MS,
+    },
+  );
 
   // Deep-confirm only where their move differed from the shallow best. A
   // depth-12 preference is not firm enough to call a move a mistake, and a
   // uniform deep sweep would cost several times more for the same verdicts.
   const deepIndices: number[] = [];
   for (let i = 0; i < pending.length; i += 1) {
-    const before = scores[i * 2];
+    const before = scores[i]?.before;
     if (before?.bestMove && before.bestMove !== pending[i].theirUci) deepIndices.push(i);
   }
 
-  const deepScores =
-    deepIndices.length > 0
-      ? await analyzePositions(
-          deepIndices.map((i) => pending[i].fenBefore),
-          DEEP,
-        )
-      : [];
+  const deepScores = await mapWithEngines(
+    deepIndices,
+    (index, search) => search(pending[index].fenBefore, DEEP_DEPTH),
+    { concurrency: ENGINE_CONCURRENCY, threads: 1, totalTimeoutMs: DEEP_TIMEOUT_MS },
+  );
   const deepByPending = new Map<number, (typeof deepScores)[number]>();
   deepIndices.forEach((pendingIndex, k) => {
     const score = deepScores[k];
@@ -161,8 +184,8 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
 
   const moves: GradedMove[] = [];
   for (let i = 0; i < pending.length; i += 1) {
-    const before = scores[i * 2];
-    const after = scores[i * 2 + 1];
+    const before = scores[i]?.before;
+    const after = scores[i]?.after;
     if (!before || !after) continue; // budget ran out mid-batch
 
     const deep = deepByPending.get(i);
@@ -190,5 +213,9 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
     });
   }
 
-  return { games: scanned, moves, positionsEvaluated: fens.length + deepIndices.length };
+  return {
+    games: scanned,
+    moves,
+    positionsEvaluated: pending.length * 2 + deepIndices.length,
+  };
 }

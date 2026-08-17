@@ -270,10 +270,19 @@ function hydrateGames(
     if (nodes.length === 0) continue;
 
     // A clock array that does not line up with the move list shifts EVERY think
-    // time in the game by a constant ply offset. Silently wrong beats missing,
-    // so drop the whole array and count it.
+    // time in the game by a constant ply offset, so a mismatch means the array
+    // is unusable and gets dropped whole.
+    //
+    // One extra entry is the exception, and it is the common case rather than a
+    // corruption: when a game ends without a move — resignation, a flag fall —
+    // both sites record a final clock reading with no ply behind it. Measured on
+    // a 30-game sample: 21 games +1 (all resign/flagged), 9 games exact (all
+    // mate). Rejecting those was discarding 70% of all clock data. The extra is
+    // at the END, so trimming it is safe; anything else is a real mismatch.
     let clocks = game.clocks;
-    if (clocks && clocks.length !== allPlies.length) {
+    if (clocks && clocks.length === allPlies.length + 1) {
+      clocks = clocks.slice(0, allPlies.length);
+    } else if (clocks && clocks.length !== allPlies.length) {
       clocks = undefined;
       clocksDiscardedMisaligned += 1;
     }

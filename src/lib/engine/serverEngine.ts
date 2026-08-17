@@ -89,6 +89,17 @@ type EngineModule = {
 const PRISTINE_FETCH = pristineFetch;
 
 /**
+ * Each Emscripten engine registers its own `uncaughtException` and
+ * `unhandledRejection` handlers, so a pool of 8 trips Node's default limit of
+ * 10 and prints a memory-leak warning that is not a leak.
+ *
+ * Raised rather than silenced: the warning exists to catch real listener leaks,
+ * and leaving it firing on every profiling run would train us to ignore it. The
+ * ceiling is generous but finite, so a genuine leak still surfaces.
+ */
+process.setMaxListeners(64);
+
+/**
  * Boots are serialised. Emscripten module init touches process-global state, and
  * a pool would otherwise interleave several inits. Each boot is ~300ms, so even
  * eight cost ~2.4s once — negligible against the search work they then do.
