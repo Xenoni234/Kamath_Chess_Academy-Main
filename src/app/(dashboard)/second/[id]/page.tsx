@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   BookOpen,
   Download,
+  Layers,
   Loader2,
   Play,
   RefreshCw,
@@ -64,12 +65,50 @@ type RepLine = {
   evalCp?: number | null;
 };
 
+/** Per-account provenance. Absent on dossiers built before accounts could merge. */
+type ArtifactAccount = {
+  handle: string;
+  source: "LICHESS" | "CHESSCOM";
+  gamesFetched: number;
+  gamesUsed: number;
+  oldestPlayedAt: string | null;
+  newestPlayedAt: string | null;
+  meanWeight: number;
+  status: "ok" | "not-found" | "rate-limited" | "error";
+};
+
+type IngestDiagnostics = {
+  totalFetched: number;
+  duplicatesDropped: number;
+  selfPlayDropped: number;
+  noTimestampDropped: number;
+  budgetTrimmed: number;
+  clocksDiscardedMisaligned: number;
+  budgetReduced?: boolean;
+};
+
 type Artifact = {
   handle: string;
   source: string;
+  /** Absent on older, single-account dossiers. */
+  accounts?: ArtifactAccount[];
+  ingest?: IngestDiagnostics;
+  recencyReferenceAt?: string;
+  /**
+   * Absent on dossiers generated before think time was increment-corrected. On
+   * those, every clock figure is understated by the increment.
+   */
+  clockBasis?: { initialSec: number | null; gamesUsed: number; gamesExcluded: number };
   colorToPlay: string;
   gamesAnalyzed: number;
-  ratingSummary: { format: string; rating: number | null }[];
+  /** `handle`/`source` absent on older dossiers, where two accounts on the same
+   *  format collided into one entry. */
+  ratingSummary: {
+    format: string;
+    rating: number | null;
+    handle?: string;
+    source?: "LICHESS" | "CHESSCOM";
+  }[];
   trieSummary: { line: string[]; weightedCount: number; scorePct: number }[];
   weaknesses: Weakness[];
   transpositions: Transposition[];
@@ -330,8 +369,25 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
   }
 
   const a = profile.artifact;
+  const mergedAccounts = a?.accounts ?? [];
+  const isMulti = mergedAccounts.length > 1;
   const ratings =
-    a?.ratingSummary?.filter((r) => r.rating).map((r) => `${r.format} ${r.rating}`).join(" · ") || null;
+    a?.ratingSummary
+      ?.filter((r) => r.rating)
+      // Prefix the handle only when it would otherwise be ambiguous — older
+      // dossiers have no handle on these entries at all.
+      .map((r) => (isMulti && r.handle ? `${r.handle} ${r.format} ${r.rating}` : `${r.format} ${r.rating}`))
+      .join(" · ") || null;
+  const headerTitle = mergedAccounts.length
+    ? mergedAccounts.map((acc) => acc.handle).join(" / ")
+    : profile.handle;
+  const sites = mergedAccounts.length
+    ? [...new Set(mergedAccounts.map((acc) => (acc.source === "LICHESS" ? "Lichess" : "Chess.com")))].join(
+        " + ",
+      )
+    : profile.source === "LICHESS"
+      ? "Lichess"
+      : "Chess.com";
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -341,9 +397,9 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold text-kca-white">{profile.handle}</h1>
+          <h1 className="text-3xl font-display font-bold text-kca-white">{headerTitle}</h1>
           <p className="mt-1 text-sm text-kca-gray-400">
-            {profile.source === "LICHESS" ? "Lichess" : "Chess.com"}
+            {sites}
             {ratings && ` · ${ratings}`} · you play {profile.colorToPlay} · {profile.gamesAnalyzed} games
             profiled
             {profile.fideId && ` · FIDE ${profile.fideId}`}
@@ -444,6 +500,84 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
               </li>
             ))}
           </ol>
+        </Section>
+      )}
+
+      {/* Provenance, not decoration. Merging accounts means one shared recency
+          reference, which correctly discounts an account the player abandoned —
+          but that decision has to be VISIBLE, or a dossier quietly built almost
+          entirely from one account looks the same as one built from five. */}
+      {a && mergedAccounts.length > 0 && (
+        <Section title="Sources" icon={Layers}>
+          <div className="space-y-2">
+            {mergedAccounts.map((acc, i) => {
+              const stale = acc.gamesUsed > 0 && acc.meanWeight < 0.25;
+              return (
+                <div key={i} className="card border border-kca-border bg-kca-surface p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-mono text-sm text-kca-white">{acc.handle}</span>
+                    <span className="text-xs text-kca-gray-400">
+                      {acc.source === "LICHESS" ? "Lichess" : "Chess.com"}
+                    </span>
+                  </div>
+                  {acc.status !== "ok" ? (
+                    <p className="mt-1.5 text-sm text-kca-danger">
+                      {acc.status === "not-found"
+                        ? "Account not found — check the username and that the profile is public. No games from it are in this dossier."
+                        : acc.status === "rate-limited"
+                          ? "The site rate-limited this account, so its games are missing. Regenerate to retry."
+                          : "This account could not be reached, so its games are missing. Regenerate to retry."}
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-sm text-kca-gray-400">
+                      {acc.gamesUsed} games used
+                      {acc.gamesFetched !== acc.gamesUsed && ` of ${acc.gamesFetched} fetched`}
+                      {acc.oldestPlayedAt && acc.newestPlayedAt && (
+                        <>
+                          {" "}
+                          · {acc.oldestPlayedAt.slice(0, 10)} → {acc.newestPlayedAt.slice(0, 10)}
+                        </>
+                      )}{" "}
+                      · recency{" "}
+                      <span className={cn(stale ? "text-kca-warning" : "text-kca-gray-100")}>
+                        {acc.meanWeight.toFixed(2)}
+                      </span>
+                    </p>
+                  )}
+                  {stale && (
+                    <p className="mt-1 text-xs text-kca-warning">
+                      Most of this account&rsquo;s games are over a year old, so they are heavily
+                      discounted against the newer accounts here.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {a.ingest && (
+            <p className="mt-3 text-xs text-kca-gray-500">
+              {a.ingest.totalFetched} games fetched
+              {a.ingest.duplicatesDropped > 0 && `, ${a.ingest.duplicatesDropped} duplicates dropped`}
+              {a.ingest.selfPlayDropped > 0 &&
+                `, ${a.ingest.selfPlayDropped} dropped where two of these accounts played each other`}
+              {a.ingest.budgetTrimmed > 0 &&
+                `, ${a.ingest.budgetTrimmed} older games trimmed to the limit`}
+              {a.ingest.clocksDiscardedMisaligned > 0 &&
+                `, ${a.ingest.clocksDiscardedMisaligned} games had unusable clock data`}
+              .
+              {a.ingest.budgetReduced &&
+                " This dossier ran without the job queue, so it used a reduced sample — start the worker and regenerate for the full one."}
+            </p>
+          )}
+
+          {a.clockBasis && (
+            <p className="mt-1.5 text-xs text-kca-gray-500">
+              {a.clockBasis.initialSec
+                ? `Think times are increment-corrected and measured only on their ~${a.clockBasis.initialSec}s games (${a.clockBasis.gamesUsed} games; ${a.clockBasis.gamesExcluded} excluded as a different time control), so a bullet game and a rapid game are never averaged together.`
+                : "These games carried no usable clock data, so no think-time figures are given."}
+            </p>
+          )}
         </Section>
       )}
 

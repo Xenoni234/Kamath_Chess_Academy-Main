@@ -7,15 +7,26 @@ import { cn } from "@/lib/utils";
 
 type ProfileStatus = "pending" | "processing" | "complete" | "failed";
 
+type Site = "LICHESS" | "CHESSCOM";
+type AccountRow = { handle: string; source: Site };
+
 type Profile = {
   id: string;
+  /** The primary account. Always present, including on pre-multi-account rows. */
   handle: string;
-  source: "LICHESS" | "CHESSCOM";
+  source: Site;
+  /** Empty on dossiers created before several accounts could be merged. */
+  accounts?: { handle: string; source: Site; position: number }[];
   colorToPlay: string;
   status: ProfileStatus;
   gamesAnalyzed: number;
   createdAt: string;
 };
+
+/** Up to this many accounts per dossier — mirrors MAX_PROFILE_ACCOUNTS in zod. */
+const MAX_ACCOUNTS = 5;
+
+const SITE_LABEL: Record<Site, string> = { LICHESS: "Lichess", CHESSCOM: "Chess.com" };
 
 const POLL_INTERVAL_MS = 4000;
 /** Profiling runs engine analysis over many positions; allow a long window. */
@@ -41,8 +52,8 @@ export default function SecondPage() {
   const [listError, setListError] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [handle, setHandle] = useState("");
-  const [source, setSource] = useState<"LICHESS" | "CHESSCOM">("LICHESS");
+  /** 1..5 accounts, all describing the same human. */
+  const [accounts, setAccounts] = useState<AccountRow[]>([{ handle: "", source: "LICHESS" }]);
   const [colorToPlay, setColorToPlay] = useState<"white" | "black">("white");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -132,19 +143,38 @@ export default function SecondPage() {
     };
   }, [loadProfiles, startPolling, stopPolling]);
 
+  const updateAccount = useCallback((index: number, patch: Partial<AccountRow>) => {
+    setAccounts((current) =>
+      current.map((account, i) => (i === index ? { ...account, ...patch } : account)),
+    );
+  }, []);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!handle.trim()) {
-      setFormError("Enter the opponent's username.");
+
+    const filled = accounts
+      .map((a) => ({ ...a, handle: a.handle.trim() }))
+      .filter((a) => a.handle.length > 0);
+
+    if (filled.length === 0) {
+      setFormError("Enter at least one username.");
       return;
     }
+    // Mirrors the server's case-insensitive refine, so the common mistake is
+    // caught before a job is queued rather than after a 400.
+    const keys = filled.map((a) => `${a.source}:${a.handle.toLowerCase()}`);
+    if (new Set(keys).size !== keys.length) {
+      setFormError("The same account is listed twice.");
+      return;
+    }
+
     setIsSubmitting(true);
     setFormError(null);
     try {
       const response = await fetch("/api/second/profiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle: handle.trim(), source, colorToPlay }),
+        body: JSON.stringify({ accounts: filled, colorToPlay }),
       });
       const data = await response.json();
       if (!response.ok || !data.success) {
@@ -152,7 +182,7 @@ export default function SecondPage() {
         return;
       }
       setIsModalOpen(false);
-      setHandle("");
+      setAccounts([{ handle: "", source: "LICHESS" }]);
       await loadProfiles();
       startPolling();
     } catch {
@@ -209,10 +239,22 @@ export default function SecondPage() {
                   ready && "hover:border-kca-cyan/50 transition-colors",
                 )}
               >
-                <div>
-                  <div className="text-lg font-semibold text-kca-white">{p.handle}</div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-semibold text-kca-white">{p.handle}</span>
+                    {(p.accounts?.length ?? 0) > 1 && (
+                      <span className="rounded-full border border-kca-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-kca-gray-400">
+                        +{p.accounts!.length - 1} more
+                      </span>
+                    )}
+                  </div>
                   <div className="text-sm text-kca-gray-400 mt-1">
-                    {p.source === "LICHESS" ? "Lichess" : "Chess.com"} · you play {p.colorToPlay}
+                    {/* Pre-multi-account rows have no `accounts`, so fall back
+                        to the denormalised primary rather than showing nothing. */}
+                    {p.accounts?.length
+                      ? [...new Set(p.accounts.map((a) => SITE_LABEL[a.source]))].join(" + ")
+                      : SITE_LABEL[p.source]}{" "}
+                    · you play {p.colorToPlay}
                     {p.gamesAnalyzed > 0 && ` · ${p.gamesAnalyzed} games`} ·{" "}
                     {new Date(p.createdAt).toLocaleString()}
                   </div>
@@ -286,32 +328,57 @@ export default function SecondPage() {
             <form onSubmit={submit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-kca-gray-400 mb-1.5">
-                  Site
+                  Their accounts
                 </label>
-                <select
-                  className="input-field py-2 text-sm"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value as typeof source)}
-                >
-                  <option value="LICHESS">Lichess</option>
-                  <option value="CHESSCOM">Chess.com</option>
-                </select>
-              </div>
+                <div className="space-y-2">
+                  {accounts.map((account, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <select
+                        className="input-field w-32 shrink-0 py-2 text-sm"
+                        value={account.source}
+                        onChange={(e) => updateAccount(index, { source: e.target.value as Site })}
+                        aria-label={`Site for account ${index + 1}`}
+                      >
+                        <option value="LICHESS">Lichess</option>
+                        <option value="CHESSCOM">Chess.com</option>
+                      </select>
+                      <input
+                        className="input-field min-w-0 flex-1 py-2 text-sm"
+                        value={account.handle}
+                        onChange={(e) => updateAccount(index, { handle: e.target.value })}
+                        placeholder={index === 0 ? "e.g. DrNykterstein" : "Another account"}
+                        aria-label={`Username for account ${index + 1}`}
+                        autoFocus={index === 0}
+                      />
+                      {accounts.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setAccounts((c) => c.filter((_, i) => i !== index))}
+                          className="shrink-0 rounded-lg p-2 text-kca-gray-400 hover:text-kca-danger"
+                          aria-label={`Remove account ${index + 1}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
 
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-kca-gray-400 mb-1.5">
-                  Their username
-                </label>
-                <input
-                  className="input-field py-2 text-sm"
-                  value={handle}
-                  onChange={(e) => setHandle(e.target.value)}
-                  placeholder="e.g. DrNykterstein"
-                  autoFocus
-                />
-                <p className="mt-1.5 text-xs text-kca-gray-500">
-                  FIDE has no public game database, so preparation needs a Lichess or Chess.com
-                  account.
+                {accounts.length < MAX_ACCOUNTS && (
+                  <button
+                    type="button"
+                    onClick={() => setAccounts((c) => [...c, { handle: "", source: "LICHESS" }])}
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-kca-cyan hover:underline"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add another account
+                  </button>
+                )}
+
+                <p className="mt-2 text-xs text-kca-gray-500">
+                  Add every account the same player uses — up to {MAX_ACCOUNTS}, across both sites.
+                  Their games are merged into one dossier, so a player who plays rapid on Lichess
+                  and blitz on Chess.com is profiled from all of it. FIDE has no public game
+                  database, so preparation needs at least one online account.
                 </p>
               </div>
 

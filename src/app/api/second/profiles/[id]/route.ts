@@ -35,6 +35,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         artifact: true,
         summary: true,
         createdAt: true,
+        accounts: {
+          select: { handle: true, source: true, position: true },
+          orderBy: { position: "asc" },
+        },
         repertoires: {
           orderBy: { createdAt: "desc" },
           take: 1,
@@ -57,6 +61,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         id: profile.id,
         handle: profile.handle,
         source: profile.source,
+        accounts: profile.accounts,
         colorToPlay: profile.colorToPlay,
         fideId: profile.fideId,
         status: profile.status,
