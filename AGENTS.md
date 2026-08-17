@@ -103,15 +103,41 @@ deliberately deferred** — the scaffold in `src/lib/razorpay.ts` is inactive
 The flagship feature: profile any opponent from their Lichess/Chess.com history
 and generate an annotated repertoire aimed at that specific player. All code
 lives under `src/lib/second/`:
-- ✅ **Ingestion** (`ingest.ts`) — Lichess ndjson + Chess.com archives, with
-  clocks and timestamps. **Time-decay weighting is relative to the player's own
-  most recent game** (`weight = 0.5 ** (ageDays / 180)`), so an inactive player
-  still profiles correctly. 24 h Redis cache of the compact form.
+- ✅ **Ingestion** (`ingest.ts`) — Lichess ndjson + Chess.com archives. Retains
+  per game: game id, normalised `termination` (+ `terminationRaw`), the real
+  `TimeControl` (initial/increment/per-move — every field nullable, and **null
+  means unknown; never default an increment to 0**), both players' ratings,
+  `rated`, ECO, and both timestamps. 24 h Redis cache of the compact form, key
+  versioned (`second:ingest:v2:…`) — **bump it whenever `RawGame` changes**, or
+  cached values hydrate with the new fields `undefined` and the dossier is blind
+  while looking plausible.
+- ✅ **Up to 5 accounts per dossier** (`OpponentAccount`), any mix of both sites,
+  merged by `fetchOpponentGamesMulti`. Deduped by `source:gameId`; games between
+  two profiled accounts are dropped as self-play. **Time-decay weighting uses one
+  shared reference — the newest game across every account** (`weight = 0.5 **
+  (ageDays / 180)`), so an account abandoned 18 months ago is correctly
+  discounted rather than weighing 1.0 on its own newest game. An inactive player
+  with only one account still profiles at full strength. `ArtifactAccount.meanWeight`
+  surfaces the discount in the Sources panel; hiding it inside the maths would
+  make a dossier built almost entirely from one account indistinguishable from
+  one built from five.
 - ✅ **Opening Trie** (`trie.ts`) — SAN-keyed repertoire tree per colour,
   weighted counts + score, capped at 24 plies.
 - ✅ **Weakness detection** (`weakness.ts`) — engine-grades their recurring
   decision positions (ply 5–20) and blends accuracy with **clock pressure**:
   positions they think long about *and* misplay.
+  **Think time is increment-corrected.** Clocks are *remaining* time, so
+  `prev − curr` under-reports by exactly the increment on every increment game
+  and goes negative when the increment exceeds the time spent. `clockSpentCs`
+  adds it back and returns **null rather than a guess** when the increment is
+  unknown, the result is negative, or it exceeds the base clock. Two more
+  silent-wrongness guards live here: a clock array that does not match the move
+  list is dropped whole (it would otherwise shift every think time in that game
+  by a constant ply offset), and samples are bucketed to the modal `initialSec`
+  within 4×, because averaging a 1+0 account with a 15+10 one describes neither.
+  `artifact.clockBasis` records which games the figures came from.
+  **Dossiers generated before this are not comparable** — their `avgClockSpent`
+  is understated by the increment, and `clockBasis` is absent.
 - ✅ **Transpositions** (`graph.ts`) — loads the Trie into **Neo4j**, MERGE-ing
   on a 4-field FEN key (no move counters) so move-orders collapse into a DAG;
   Cypher then finds bypass move-orders to weak targets. Opt-in: without

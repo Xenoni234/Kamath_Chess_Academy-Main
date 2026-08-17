@@ -32,6 +32,12 @@ export async function GET(request: NextRequest) {
         status: true,
         gamesAnalyzed: true,
         createdAt: true,
+        // `handle`/`source` are still returned above: pre-multi-account rows
+        // have no `accounts` rows at all, and an older client reads them.
+        accounts: {
+          select: { handle: true, source: true, position: true },
+          orderBy: { position: "asc" },
+        },
       },
     });
     return NextResponse.json({ success: true, profiles });
@@ -73,16 +79,38 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { handle, source, colorToPlay, fideId } = parsed.data;
+  const { accounts, colorToPlay, fideId } = parsed.data;
+  const primary = accounts[0];
+
+  // A dossier now pulls up to 1000 games and runs a pool of engines. Several at
+  // once is the incident already documented on the regenerate route — 48 engines
+  // on 10 cores and a 13.8s login — except that guard cannot help here, because
+  // every POST creates a fresh row and has nothing to contend over.
+  const inFlight = await db.opponentProfile.count({
+    where: { requestedById: payload.userId, status: { in: ["pending", "processing"] } },
+  });
+  if (inFlight >= 2) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: "You already have two dossiers building. Wait for one to finish, then try again.",
+      },
+      { status: 429 },
+    );
+  }
 
   const profile = await db.opponentProfile.create({
     data: {
       requestedById: payload.userId,
-      handle,
-      source,
+      // Denormalised primary — the invariant is that it equals position 0.
+      handle: primary.handle,
+      source: primary.source,
       colorToPlay,
       fideId: fideId || null,
       status: "pending",
+      accounts: {
+        create: accounts.map((account, position) => ({ ...account, position })),
+      },
     },
     select: { id: true },
   });
@@ -90,7 +118,7 @@ export async function POST(request: NextRequest) {
   await writeAuditLog({
     action: "second.profile.create",
     userId: payload.userId,
-    metadata: { profileId: profile.id, handle, source, colorToPlay },
+    metadata: { profileId: profile.id, accounts, colorToPlay },
     request,
   });
 
@@ -98,8 +126,9 @@ export async function POST(request: NextRequest) {
   await enqueueProfile({
     profileId: profile.id,
     requestedById: payload.userId,
-    handle,
-    source,
+    accounts,
+    handle: primary.handle,
+    source: primary.source,
     colorToPlay,
     fideId: fideId || undefined,
   });

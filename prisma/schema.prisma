@@ -464,6 +464,11 @@ model AuditLog {
  * Trie summary, ranked weaknesses, transposition bypass lines, novelties) is
  * stashed as JSON once the queue job completes; `status` is a plain string and
  * moves pending -> processing -> complete/failed exactly like GameReport.
+ *
+ * `handle`/`source` are the PRIMARY account and stay denormalised here even
+ * though a profile may merge several: the list view, the download filename and
+ * every pre-multi-account row depend on them. Invariant: they always equal the
+ * `accounts` row with `position = 0`.
  */
 model OpponentProfile {
   id            String          @id @default(cuid())
@@ -481,10 +486,40 @@ model OpponentProfile {
   updatedAt     DateTime        @updatedAt
   requestedBy   User            @relation(fields: [requestedById], references: [id], onDelete: Cascade)
   repertoires   RepertoirePlan[]
+  accounts      OpponentAccount[]
 
   @@index([requestedById, createdAt])
   @@index([handle, source])
   @@map("opponent_profiles")
+}
+
+/**
+ * One online account merged into a dossier — 1..5 per profile, any mix of
+ * Lichess and Chess.com, because a player's evidence is usually split across
+ * sites.
+ *
+ * A table rather than a JSON column on the profile: this is job *input*, re-read
+ * on every regenerate, and a JSON blob cannot carry the unique constraint. Two
+ * copies of the same account in one dossier would silently double that player's
+ * weight in every weighted figure.
+ *
+ * The constraint is a backstop, not the guarantee — Postgres unique indexes are
+ * case-sensitive, so "Magnus" and "magnus" both insert. The zod refine on the
+ * create route does the case-insensitive check, and the API is the only writer.
+ */
+model OpponentAccount {
+  id        String          @id @default(cuid())
+  profileId String
+  handle    String
+  source    OpponentSource
+  /// 0 = primary; mirrors OpponentProfile.handle/source.
+  position  Int             @default(0)
+  createdAt DateTime        @default(now())
+  profile   OpponentProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, source, handle])
+  @@index([handle, source])
+  @@map("opponent_accounts")
 }
 
 /**

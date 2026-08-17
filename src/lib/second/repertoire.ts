@@ -60,10 +60,26 @@ export function buildRepertoireLines(artifact: ProfileArtifact): RepertoireLine[
 
 /** Compact, promptable description of the opponent for the AI layer. */
 export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLine[]): string {
+  // Prefix the handle when several accounts are merged, so two "blitz" ratings
+  // read as two accounts rather than a contradiction.
+  const multiAccount = (artifact.accounts?.length ?? 0) > 1;
   const ratings = artifact.ratingSummary
     .filter((r) => r.rating)
-    .map((r) => `${r.format} ${r.rating}`)
+    .map((r) => (multiAccount && r.handle ? `${r.handle} ${r.format} ${r.rating}` : `${r.format} ${r.rating}`))
     .join(", ");
+
+  // The model is describing one human, not one username. Without this it writes
+  // about the primary handle as though the other accounts' games were theirs.
+  const accountLine = artifact.accounts?.length
+    ? artifact.accounts
+        .map(
+          (a) =>
+            `${a.handle} (${a.source === "LICHESS" ? "Lichess" : "Chess.com"}, ${a.gamesUsed} games${
+              a.meanWeight < 0.25 ? ", mostly old games — heavily discounted" : ""
+            })`,
+        )
+        .join(", ")
+    : `${artifact.handle} (${artifact.source})`;
 
   const weaknesses = artifact.weaknesses
     .slice(0, 6)
@@ -103,10 +119,15 @@ export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLin
     })
     .join("\n");
 
-  return `Opponent: ${artifact.handle} (${artifact.source})
+  return `Opponent: ${artifact.handle}
+Accounts profiled${multiAccount ? " (one player, several accounts — treat them as the same person)" : ""}: ${accountLine}
 Ratings: ${ratings || "unknown"}
 Games analysed: ${artifact.gamesAnalyzed}
-We play: ${artifact.colorToPlay}
+We play: ${artifact.colorToPlay}${
+    artifact.clockBasis?.initialSec
+      ? `\nThink-time figures below are measured on their ~${artifact.clockBasis.initialSec}s games only (${artifact.clockBasis.gamesUsed} games; ${artifact.clockBasis.gamesExcluded} excluded as a different time control).`
+      : "\nNo usable clock data — do not make any claim about how long they think."
+  }
 
 Their most-played lines:
 ${artifact.trieSummary

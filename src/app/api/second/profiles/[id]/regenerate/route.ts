@@ -40,6 +40,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       source: true,
       colorToPlay: true,
       fideId: true,
+      accounts: {
+        select: { handle: true, source: true },
+        orderBy: { position: "asc" },
+      },
     },
   });
 
@@ -80,6 +84,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   await enqueueProfile({
     profileId: profile.id,
     requestedById: payload.userId,
+    // Rows created before multi-account support have no `accounts` rows, so
+    // fall back to the denormalised primary rather than enqueuing an empty list.
+    accounts: profile.accounts.length
+      ? profile.accounts
+      : [{ handle: profile.handle, source: profile.source }],
     handle: profile.handle,
     source: profile.source,
     // Stored as a plain String column, so narrow it rather than casting.
