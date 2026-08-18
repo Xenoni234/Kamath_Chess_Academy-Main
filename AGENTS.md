@@ -1,4 +1,4 @@
-npm# Kamath Chess Academy (KCA) — Project Context
+# Kamath Chess Academy (KCA) — Project Context
 
 Read this file fully before making any changes. It defines the project,
 current state, conventions, and hard rules.
@@ -469,6 +469,13 @@ Reusable classes already defined in `globals.css`: `.btn-primary`,
 ```bash
 npm run dev          # starts server.mjs — must print "Socket.io server attached"
 npm run worker       # BullMQ worker (reports + opponent profiling); needs QUEUE_REDIS_URL
+
+# Phase 4 verification. These catch what tsc cannot — every one of them has
+# already found a real bug that typechecked cleanly.
+npx tsx --env-file=.env.local scripts/validateMotifs.ts 1500   # score the motif detector vs Lichess puzzle labels
+npx tsx --env-file=.env.local scripts/verifyScan.ts <handle> LICHESS 30   # ingest + scan + profiles, with timings
+npx tsx --env-file=.env.local scripts/dryRunDossier.ts         # full artifact + PDF assembly, no DB writes
+npx tsx --env-file=.env.local scripts/e2eProfileJob.ts         # the real job incl. persistence; creates and deletes its own dossier
 npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})
 npx tsc --noEmit     # type check, must pass with zero errors
 npm run build        # production build — the strictest gate
