@@ -64,7 +64,7 @@ in `src/proxy.ts` (this Next.js version names middleware `proxy`, not
 
 ---
 
-## Phase roadmap (7 phases)
+## Phase roadmap (8 phases)
 
 ### Phase 0 — Foundation ✅ COMPLETE
 Public website (Hero, Achievements, About, Contact, Footer), custom JWT auth
@@ -205,11 +205,28 @@ reaching the same Four Knights position. Note `transpositions: 0` is a normal
 result on a small sample: the query only reports a bypass when a *weak* position
 is reachable by two or more distinct move-orders in their own games.
 
-### Phase 5 — Video classes 📋 PLANNED
+### Phase 5 — Digital Second: OTB, manual games, evolution 🔨 IN PROGRESS
+Extends Phase 4 from online-usernames-only to the games that actually decide
+tournaments. Tasks in order:
+
+1. **Supabase region migration — DO THIS FIRST. Blocked on the user.**
+   `scripts/migrate-region.sh` is written and tested and `libpq` is installed;
+   it needs a Mumbai (`ap-south-1`) Supabase project and its **direct (5432)**
+   URL. Measured justification: `SELECT 1` against the current Tokyo instance
+   costs **134 ms**, and the full notifications route also costs 134 ms — i.e.
+   essentially every API response in the app is paying pure round-trip, not
+   query time. `ap-south-1` should bring that to ~20-30 ms. Update the region
+   noted in this file once it lands.
+2. **Manual PGN input** (up to 15 games) — `src/lib/second/pgnImport.ts`.
+3. **OTB games from a FIDE ID**, via Lichess broadcasts.
+4. **Style evolution over time** — the same metrics bucketed by era.
+5. **`logic.md`** — the whole Second AI explained for a chess player.
+
+### Phase 6 — Video classes 📋 PLANNED
 Inbuilt group video via mediasoup WebRTC SFU (no third-party API), Socket.io
 signalling, screen sharing for board demonstration, in-class chat.
 
-### Phase 6 — Mobile 📋 PLANNED
+### Phase 7 — Mobile 📋 PLANNED
 React Native app for iOS and Android, offline puzzle solving with local cache,
 push notifications.
 
