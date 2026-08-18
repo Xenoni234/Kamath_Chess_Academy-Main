@@ -83,7 +83,7 @@ function thinkCsAt(game: WeightedGame, ply: number): number | null {
   if (incrementSec === null) return null;
   const prev = clocks[ply - 3];
   const curr = clocks[ply - 1];
-  if (prev === undefined || curr === undefined) return null;
+  if (prev == null || curr == null) return null;
   const spent = prev - curr + incrementSec * 100;
   if (spent < 0) return null;
   if (initialSec !== null && spent > initialSec * 100) return null;

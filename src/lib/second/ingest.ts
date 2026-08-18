@@ -17,12 +17,15 @@
 import { buildLineFromSan } from "@/lib/engine/analysis";
 import { pristineFetch } from "@/lib/pristineFetch";
 import { redis } from "@/lib/redis";
+import { clocksFromPgn, pgnTag, pgnTimestampMs, sanFromPgn } from "@/lib/second/pgnImport";
 import type {
   AccountIngestStatus,
   AccountRef,
   ArtifactAccount,
   IngestDiagnostics,
   OpponentSource,
+  RawGame,
+  RawIngest,
   SpeedBucket,
   Termination,
   TimeControl,
@@ -59,33 +62,6 @@ export const HYDRATE_MAX_PLY = 24;
 /** Accounts are fetched in parallel; the monthly walk inside one stays serial,
  *  because Chess.com throttles parallel bursts against the same endpoint. */
 const ACCOUNT_CONCURRENCY = 3;
-
-/** Compact, cacheable game record — no expanded FEN tree, no recency weight. */
-type RawGame = {
-  color: "w" | "b";
-  san: string;
-  openingName: string;
-  eco: string | null;
-  won: boolean;
-  drawn: boolean;
-  gameId: string;
-  termination: Termination;
-  terminationRaw: string | null;
-  tc: TimeControl;
-  rated: boolean | null;
-  playerRating: number | null;
-  opponentRating: number | null;
-  opponentHandle: string | null;
-  startedAtMs: number | null;
-  endedAtMs: number | null;
-  clocks?: number[];
-};
-
-type RawIngest = {
-  games: RawGame[];
-  ratingSummary: { format: string; rating: number | null }[];
-  status: AccountIngestStatus;
-};
 
 export type IngestResult = {
   games: WeightedGame[];
@@ -188,21 +164,6 @@ function parseChessComTimeControl(raw: string | undefined, speed: SpeedBucket): 
   }
 
   return base;
-}
-
-function pgnTag(pgn: string, tag: string): string | null {
-  const match = new RegExp(`\\[${tag}\\s+"([^"]*)"\\]`).exec(pgn);
-  return match?.[1] || null;
-}
-
-/** Parse a PGN date+time pair ("2026.08.15" + "12:34:56") to epoch ms, UTC. */
-function pgnTimestampMs(pgn: string, dateTag: string, timeTag: string): number | null {
-  const date = pgnTag(pgn, dateTag);
-  const time = pgnTag(pgn, timeTag);
-  if (!date) return null;
-  const iso = `${date.replace(/\./g, "-")}T${time ?? "00:00:00"}Z`;
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? ms : null;
 }
 
 async function timedFetch(url: string, init: RequestInit, signal?: AbortSignal) {
@@ -450,31 +411,6 @@ const DRAW_RESULTS = new Set([
   "50move",
   "timevsinsufficient",
 ]);
-
-/** Pull remaining-clock centiseconds per ply from a PGN's %clk comments. */
-function clocksFromPgn(pgn: string): number[] {
-  const out: number[] = [];
-  const re = /\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(pgn)) !== null) {
-    const cs = Math.round((Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 100);
-    out.push(cs);
-  }
-  return out;
-}
-
-/** Strip a PGN to a bare SAN move list ("e4 e5 Nf3 ..."). */
-function sanFromPgn(pgn: string): string {
-  const body = pgn.replace(/\[[^\]]*\]/g, " ").replace(/\{[^}]*\}/g, " ");
-  return body
-    .replace(/\d+\.(\.\.)?/g, " ")
-    .replace(/\$\d+/g, " ")
-    .replace(/(1-0|0-1|1\/2-1\/2|\*)/g, " ")
-    .replace(/[?!]+/g, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" ");
-}
 
 async function fetchChessComRaw(
   handle: string,

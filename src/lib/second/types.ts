@@ -66,6 +66,46 @@ export type TimeControl = {
   speed: SpeedBucket;
   /** Verbatim source value ("600+5", "1/86400") for auditing. */
   raw: string | null;
+  /**
+   * True when `incrementSec` was DERIVED from the clock series rather than
+   * stated by the source. OTB broadcast PGN carries no [TimeControl] tag at
+   * all, so without inference every think-time figure for an over-the-board
+   * game would be null. An inferred control is still evidence — but the dossier
+   * has to say which it is.
+   */
+  incrementInferred?: boolean;
+};
+
+/**
+ * Compact, cacheable per-game record — no expanded FEN tree, no recency weight.
+ *
+ * Lives here rather than in ingest.ts because three sources now produce it:
+ * the two online APIs, pasted PGN, and OTB broadcasts.
+ */
+export type RawGame = {
+  color: "w" | "b";
+  san: string;
+  openingName: string;
+  eco: string | null;
+  won: boolean;
+  drawn: boolean;
+  gameId: string;
+  termination: Termination;
+  terminationRaw: string | null;
+  tc: TimeControl;
+  rated: boolean | null;
+  playerRating: number | null;
+  opponentRating: number | null;
+  opponentHandle: string | null;
+  startedAtMs: number | null;
+  endedAtMs: number | null;
+  clocks?: (number | null)[];
+};
+
+export type RawIngest = {
+  games: RawGame[];
+  ratingSummary: { format: string; rating: number | null }[];
+  status: AccountIngestStatus;
 };
 
 /**
@@ -127,7 +167,7 @@ export type WeightedGame = {
    * long array would otherwise shift every think time in the game by a constant
    * ply offset, silently.
    */
-  clocks?: number[];
+  clocks?: (number | null)[];
 };
 
 /** Per-account provenance, so a merged dossier can be audited rather than trusted. */
