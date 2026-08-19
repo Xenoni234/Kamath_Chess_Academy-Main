@@ -85,6 +85,13 @@ export function renderDossierHtml(
               `<tr><td>Losses ending: ${htmlEscape(t.label)}</td><td colspan="3" class="muted">${(t.share * 100).toFixed(0)}% of ${behaviour.lossesAnalyzed} losses</td><td>${t.count}</td></tr>`,
           ),
         )
+        .concat(
+          behaviour.otbLossesExcluded > 0
+            ? [
+                `<tr><td colspan="5" class="muted">${behaviour.otbLossesExcluded} over-the-board loss${behaviour.otbLossesExcluded === 1 ? "" : "es"} excluded — broadcast PGN records no termination.</td></tr>`,
+              ]
+            : [],
+        )
         .join("")
     : "";
 

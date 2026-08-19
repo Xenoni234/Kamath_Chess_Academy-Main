@@ -217,8 +217,8 @@ tournaments. Tasks in order:
    essentially every API response in the app is paying pure round-trip, not
    query time. `ap-south-1` should bring that to ~20-30 ms. Update the region
    noted in this file once it lands.
-2. **Manual PGN input** (up to 15 games) — `src/lib/second/pgnImport.ts`.
-3. **OTB games from a FIDE ID**, via Lichess broadcasts.
+2. **Manual PGN input** (up to 15 games) — `src/lib/second/pgnImport.ts`. ✅ splitter + ply-aligned clock/eval extraction done; paste UI pending.
+3. **OTB games from a FIDE ID**, via Lichess broadcasts — `src/lib/second/otb.ts`. ✅ done. The dead `fideId` field is now load-bearing: a FIDE id pulls the opponent's OTB games in as a `BROADCAST` account. Increment is **inferred from rising clocks** (OTB PGN has no `[TimeControl]`) and flagged `incrementInferred`; OTB games are **exempt from the recency budget trim** (scarce and old, but the most valuable for prep) and **excluded from the "how losses end" breakdown** (broadcast PGN has no `[Termination]`). Discovery scrapes `/fide/{id}/redirect` and **degrades to a name search** if that yields nothing. Live chain needs outbound network (the sandbox blocks it); verified offline against a real 90-game broadcast PGN.
 4. **Style evolution over time** — the same metrics bucketed by era.
 5. **`logic.md`** — the whole Second AI explained for a chess player.
 
@@ -493,6 +493,8 @@ npx tsx --env-file=.env.local scripts/validateMotifs.ts 1500   # score the motif
 npx tsx --env-file=.env.local scripts/verifyScan.ts <handle> LICHESS 30   # ingest + scan + profiles, with timings
 npx tsx --env-file=.env.local scripts/dryRunDossier.ts         # full artifact + PDF assembly, no DB writes
 npx tsx --env-file=.env.local scripts/e2eProfileJob.ts         # the real job incl. persistence; creates and deletes its own dossier
+npx tsx scripts/verifyOtb.ts <fideId> <broadcast.pgn>          # OTB identity + increment inference, offline against a PGN
+npx tsx --env-file=.env.local scripts/verifyOtb.ts <fideId>    # OTB full live chain against Lichess broadcasts
 npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})
 npx tsc --noEmit     # type check, must pass with zero errors
 npm run build        # production build — the strictest gate

@@ -18,6 +18,7 @@ import { buildLineFromSan } from "@/lib/engine/analysis";
 import { pristineFetch } from "@/lib/pristineFetch";
 import { redis } from "@/lib/redis";
 import { clocksFromPgn, pgnTag, pgnTimestampMs, sanFromPgn } from "@/lib/second/pgnImport";
+import { fetchOtbGames } from "@/lib/second/otb";
 import type {
   AccountIngestStatus,
   AccountRef,
@@ -591,14 +592,28 @@ async function mapWithConcurrency<T, R>(
  */
 export async function fetchOpponentGamesMulti(
   accounts: AccountRef[],
-  options: { perAccountMax?: number; totalMax?: number; signal?: AbortSignal } = {},
+  options: { perAccountMax?: number; totalMax?: number; signal?: AbortSignal; fideId?: string } = {},
 ): Promise<MergedIngestResult> {
   const perAccountMax = options.perAccountMax ?? DEFAULT_MAX;
-  const totalMax = options.totalMax ?? perAccountMax * accounts.length;
+  const sourceCount = accounts.length + (options.fideId ? 1 : 0);
+  const totalMax = options.totalMax ?? perAccountMax * Math.max(1, sourceCount);
 
   const fetched = await mapWithConcurrency(accounts, ACCOUNT_CONCURRENCY, (account) =>
     fetchAccountRaw(account, perAccountMax, options.signal).then((raw) => ({ account, raw })),
   );
+
+  // OTB games via a FIDE id enter as one more account, source BROADCAST, with a
+  // synthetic handle (the FIDE id) and the real name in displayName. From here
+  // on they are pooled, deduped and weighted exactly like an online account.
+  let otbNote: string | null = null;
+  if (options.fideId) {
+    const otb = await fetchOtbGames(options.fideId, { signal: options.signal });
+    otbNote = otb.note;
+    fetched.push({
+      account: { handle: options.fideId, source: "BROADCAST", displayName: otb.playerName },
+      raw: { games: otb.games, ratingSummary: otb.ratingSummary, status: "ok" },
+    });
+  }
 
   const diagnostics: IngestDiagnostics = {
     totalFetched: 0,
@@ -643,15 +658,27 @@ export async function fetchOpponentGamesMulti(
 
   // Newest first, then trim. Deliberately NOT an even split across accounts: an
   // account with 200 games and one with 12 should contribute 200 and 12.
+  //
+  // OTB games are exempt from the trim. They are scarce (a handful per player)
+  // and old relative to online blitz, so a pure recency sort would push them
+  // below the budget cutoff and silently drop the games that matter MOST for
+  // over-the-board preparation. Trim only the online games down to the budget.
   pool.sort((a, b) => b.playedAtMs - a.playedAtMs);
-  if (pool.length > totalMax) {
-    diagnostics.budgetTrimmed = pool.length - totalMax;
-    pool.length = totalMax;
+  const otbPool = pool.filter((g) => g.account.source === "BROADCAST");
+  const onlinePool = pool.filter((g) => g.account.source !== "BROADCAST");
+  const onlineBudget = Math.max(0, totalMax - otbPool.length);
+  if (onlinePool.length > onlineBudget) {
+    diagnostics.budgetTrimmed = onlinePool.length - onlineBudget;
+    onlinePool.length = onlineBudget;
   }
+  pool.length = 0;
+  pool.push(...otbPool, ...onlinePool);
+  pool.sort((a, b) => b.playedAtMs - a.playedAtMs);
 
   const recencyReferenceMs = pool.reduce((max, g) => Math.max(max, g.playedAtMs), 0) || Date.now();
   const { games, clocksDiscardedMisaligned } = hydrateGames(pool, recencyReferenceMs);
   diagnostics.clocksDiscardedMisaligned = clocksDiscardedMisaligned;
+  diagnostics.otbNote = otbNote;
 
   // Per-account provenance. `meanWeight` is the number that makes the shared
   // reference auditable — an account at 0.1 is three half-lives stale, and the
@@ -666,6 +693,7 @@ export async function fetchOpponentGamesMulti(
     return {
       handle: account.handle,
       source: account.source,
+      displayName: account.displayName ?? null,
       gamesFetched: raw.games.length,
       gamesUsed: mine.length,
       oldestPlayedAt: times.length ? new Date(Math.min(...times)).toISOString() : null,

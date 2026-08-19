@@ -236,6 +236,11 @@ export type IngestDiagnostics = {
   clocksDiscardedMisaligned: number;
   /** True when the run used the reduced inline-fallback budget. */
   budgetReduced?: boolean;
+  /** How OTB (FIDE/broadcast) discovery went. Null when no FIDE id was given;
+   *  a message when discovery degraded (scrape found nothing, no broadcasts,
+   *  etc.) so the dossier can state what it could not see rather than imply the
+   *  player has no OTB games. */
+  otbNote?: string | null;
 };
 
 /** One node of the opponent's opening repertoire Trie (per colour). */
@@ -445,6 +450,10 @@ export type BehaviouralProfile = {
   /** Accuracy by position character, worst first. */
   structures: BehaviourBucket[];
   lossesAnalyzed: number;
+  /** OTB losses left out of the termination breakdown below. Broadcast PGN has
+   *  no [Termination] tag, so how those games ended is genuinely unknown — the
+   *  section reports the count and excludes them rather than inventing resigns. */
+  otbLossesExcluded: number;
   /** How their losses end. Empty when there were too few losses to be useful. */
   terminations: {
     termination: string;
