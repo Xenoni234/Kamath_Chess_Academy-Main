@@ -19,6 +19,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SOURCE_LABEL } from "@/lib/second/types";
+import type { OpponentSource } from "@/lib/second/types";
 
 const POLL_INTERVAL_MS = 4000;
 /** Profiling runs engine analysis over many positions; allow a long window. */
@@ -70,7 +72,8 @@ type RepLine = {
 /** Per-account provenance. Absent on dossiers built before accounts could merge. */
 type ArtifactAccount = {
   handle: string;
-  source: "LICHESS" | "CHESSCOM";
+  displayName?: string | null;
+  source: OpponentSource;
   gamesFetched: number;
   gamesUsed: number;
   oldestPlayedAt: string | null;
@@ -142,7 +145,7 @@ type BehaviouralProfile = {
 
 type Artifact = {
   handle: string;
-  source: string;
+  source: OpponentSource;
   tactical?: TacticalProfile;
   behaviour?: BehaviouralProfile;
   /** Absent on older, single-account dossiers. */
@@ -162,7 +165,7 @@ type Artifact = {
     format: string;
     rating: number | null;
     handle?: string;
-    source?: "LICHESS" | "CHESSCOM";
+    source?: OpponentSource;
   }[];
   trieSummary: { line: string[]; weightedCount: number; scorePct: number }[];
   weaknesses: Weakness[];
@@ -176,7 +179,7 @@ type Artifact = {
 type Profile = {
   id: string;
   handle: string;
-  source: string;
+  source: OpponentSource;
   colorToPlay: string;
   fideId: string | null;
   status: string;
@@ -434,15 +437,13 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
       .map((r) => (isMulti && r.handle ? `${r.handle} ${r.format} ${r.rating}` : `${r.format} ${r.rating}`))
       .join(" · ") || null;
   const headerTitle = mergedAccounts.length
-    ? mergedAccounts.map((acc) => acc.handle).join(" / ")
+    ? mergedAccounts.map((acc) => acc.displayName ?? acc.handle).join(" / ")
     : profile.handle;
   const sites = mergedAccounts.length
-    ? [...new Set(mergedAccounts.map((acc) => (acc.source === "LICHESS" ? "Lichess" : "Chess.com")))].join(
-        " + ",
-      )
-    : profile.source === "LICHESS"
-      ? "Lichess"
-      : "Chess.com";
+    ? [...new Set(mergedAccounts.map((acc) => SOURCE_LABEL[acc.source]))].join(" + ")
+    : profile.source
+      ? SOURCE_LABEL[profile.source]
+      : "";
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -570,9 +571,9 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
               return (
                 <div key={i} className="card border border-kca-border bg-kca-surface p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-mono text-sm text-kca-white">{acc.handle}</span>
+                    <span className="font-mono text-sm text-kca-white">{acc.displayName ?? acc.handle}</span>
                     <span className="text-xs text-kca-gray-400">
-                      {acc.source === "LICHESS" ? "Lichess" : "Chess.com"}
+                      {SOURCE_LABEL[acc.source]}
                     </span>
                   </div>
                   {acc.status !== "ok" ? (

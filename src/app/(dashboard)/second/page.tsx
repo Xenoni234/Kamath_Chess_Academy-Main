@@ -4,9 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Brain, Loader2, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SOURCE_LABEL } from "@/lib/second/types";
+import type { OpponentSource } from "@/lib/second/types";
 
 type ProfileStatus = "pending" | "processing" | "complete" | "failed";
 
+/** Sources the create form lets you pick a handle for. MANUAL/BROADCAST
+ * arrive through paste / FIDE, not this dropdown. */
 type Site = "LICHESS" | "CHESSCOM";
 type AccountRow = { handle: string; source: Site };
 
@@ -14,9 +18,9 @@ type Profile = {
   id: string;
   /** The primary account. Always present, including on pre-multi-account rows. */
   handle: string;
-  source: Site;
+  source: OpponentSource;
   /** Empty on dossiers created before several accounts could be merged. */
-  accounts?: { handle: string; source: Site; position: number }[];
+  accounts?: { handle: string; source: OpponentSource; position: number }[];
   colorToPlay: string;
   status: ProfileStatus;
   gamesAnalyzed: number;
@@ -26,7 +30,6 @@ type Profile = {
 /** Up to this many accounts per dossier — mirrors MAX_PROFILE_ACCOUNTS in zod. */
 const MAX_ACCOUNTS = 5;
 
-const SITE_LABEL: Record<Site, string> = { LICHESS: "Lichess", CHESSCOM: "Chess.com" };
 
 const POLL_INTERVAL_MS = 4000;
 /** Profiling runs engine analysis over many positions; allow a long window. */
@@ -252,8 +255,8 @@ export default function SecondPage() {
                     {/* Pre-multi-account rows have no `accounts`, so fall back
                         to the denormalised primary rather than showing nothing. */}
                     {p.accounts?.length
-                      ? [...new Set(p.accounts.map((a) => SITE_LABEL[a.source]))].join(" + ")
-                      : SITE_LABEL[p.source]}{" "}
+                      ? [...new Set(p.accounts.map((a) => SOURCE_LABEL[a.source]))].join(" + ")
+                      : SOURCE_LABEL[p.source]}{" "}
                     · you play {p.colorToPlay}
                     {p.gamesAnalyzed > 0 && ` · ${p.gamesAnalyzed} games`} ·{" "}
                     {new Date(p.createdAt).toLocaleString()}

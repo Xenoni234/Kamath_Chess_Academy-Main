@@ -526,10 +526,20 @@ async function fetchAccountRaw(
 
   let raw: RawIngest;
   try {
-    raw =
-      account.source === "LICHESS"
-        ? await fetchLichessRaw(account.handle, max, signal)
-        : await fetchChessComRaw(account.handle, max, signal);
+    switch (account.source) {
+      case "LICHESS":
+        raw = await fetchLichessRaw(account.handle, max, signal);
+        break;
+      case "CHESSCOM":
+        raw = await fetchChessComRaw(account.handle, max, signal);
+        break;
+      default:
+        // MANUAL (pasted) and BROADCAST (FIDE/OTB) games never come from an
+        // online handle API — they enter through their own ingest paths. Reaching
+        // here means a wiring bug routed a synthetic handle at a live site; fail
+        // loudly rather than silently fetching Chess.com for "pasted-1".
+        throw new Error(`fetchSingleAccount cannot fetch source ${account.source}`);
+    }
   } catch (error) {
     console.error(`[second] ingest failed for ${account.source}:${account.handle}`, error);
     return empty("error");

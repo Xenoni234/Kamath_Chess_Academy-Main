@@ -6,6 +6,7 @@
  * per-instance, so the download route may legitimately 404 for older dossiers.
  */
 import puppeteer from "puppeteer";
+import { SOURCE_LABEL } from "@/lib/second/types";
 import type { ProfileArtifact, RepertoireLine } from "@/lib/second/types";
 
 function htmlEscape(value: string) {
@@ -36,8 +37,8 @@ export function renderDossierHtml(
       // meanWeight is what makes the shared recency reference auditable: an
       // account at 0.1 is three half-lives stale and barely shaped this dossier.
       const stale = a.gamesUsed > 0 && a.meanWeight < 0.25;
-      return `<tr><td class="mono">${htmlEscape(a.handle)}</td><td>${
-        a.source === "LICHESS" ? "Lichess" : "Chess.com"
+      return `<tr><td class="mono">${htmlEscape(a.displayName ?? a.handle)}</td><td>${
+        SOURCE_LABEL[a.source]
       }${htmlEscape(ACCOUNT_STATUS_COPY[a.status] ?? "")}</td><td>${a.gamesUsed}</td><td>${range}</td><td${
         stale ? ' class="muted"' : ""
       }>${a.meanWeight.toFixed(2)}${stale ? " (stale)" : ""}</td></tr>`;
