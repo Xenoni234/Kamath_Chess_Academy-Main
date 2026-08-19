@@ -182,7 +182,9 @@ export async function discoverBroadcasts(fideId: string, signal?: AbortSignal): 
       const segments = match[1].split("/").filter(Boolean);
       const head = segments[0];
       if (head && !BROADCAST_NAV_NOISE.has(head) && !BROADCAST_ID.test(head)) slugs.add(head);
-      for (const seg of segments) if (BROADCAST_ID.test(seg)) ids.add(seg);
+      // Nav words like "calendar" are 8 chars and pass BROADCAST_ID, so filter
+      // them here too, not just at the slug head.
+      for (const seg of segments) if (BROADCAST_ID.test(seg) && !BROADCAST_NAV_NOISE.has(seg)) ids.add(seg);
     }
     return { ids: [...ids], slugs: [...slugs] };
   } catch {
@@ -215,14 +217,36 @@ export async function searchBroadcastTours(query: string, signal?: AbortSignal):
 }
 
 /** Every round of one broadcast tournament, concatenated PGN. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * One tournament's PGN, with one retry on a 429.
+ *
+ * Broadcast PGN files are large (~400KB) and the endpoint is rate limited, so a
+ * burst of tour fetches trips a 429 and — without this — `fetchBroadcastPgn`
+ * would silently return null and drop that tournament's games entirely, which
+ * showed up as the SAME tour succeeding in one run and failing in the next.
+ * Respect the Retry-After header (capped) and try once more.
+ */
 export async function fetchBroadcastPgn(tourId: string, signal?: AbortSignal): Promise<string | null> {
-  try {
-    const res = await timedFetch(`https://lichess.org/api/broadcast/${encodeURIComponent(tourId)}.pgn`, signal);
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
+  const url = `https://lichess.org/api/broadcast/${encodeURIComponent(tourId)}.pgn`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await timedFetch(url, signal);
+      if (res.status === 429 && attempt === 0) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : 3_000);
+        continue;
+      }
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 export type OtbIngest = RawIngest & {
@@ -258,10 +282,16 @@ export async function fetchOtbGames(
   // tour ids via search. Scraped ids and search ids both feed one candidate set;
   // a wrong candidate just 404s at the PGN endpoint and is skipped.
   const discovery = await discoverBroadcasts(fideId, signal);
-  const candidateIds = new Set<string>(discovery.ids);
+  // Search-resolved TOUR ids first: those are the canonical ids that work
+  // against /api/broadcast/{id}.pgn. The scraped ids are usually ROUND ids that
+  // 404 on that endpoint, so they trail as a fallback rather than consuming the
+  // MAX_TOURS budget ahead of the real tournaments (measured: they crowded out
+  // every working tour and produced zero games).
+  const searchIds: string[] = [];
   for (const slug of discovery.slugs) {
-    for (const tour of await searchBroadcastTours(slugToQuery(slug), signal)) candidateIds.add(tour.id);
+    for (const tour of await searchBroadcastTours(slugToQuery(slug), signal)) searchIds.push(tour.id);
   }
+  const candidateIds = new Set<string>([...searchIds, ...discovery.ids]);
 
   let note: string | null = null;
   if (candidateIds.size === 0) {
@@ -291,8 +321,12 @@ export async function fetchOtbGames(
 
   const games: RawGame[] = [];
   const seenIds = new Set<string>();
+  let fetchedTours = 0;
   for (const tourId of tourIds.slice(0, MAX_TOURS)) {
     if (games.length >= max) break;
+    // Space out the large PGN fetches to stay under the broadcast rate limit.
+    if (fetchedTours > 0) await sleep(700);
+    fetchedTours += 1;
     const pgn = await fetchBroadcastPgn(tourId, signal);
     if (!pgn) continue;
     for (const one of splitPgnGames(pgn)) {
@@ -317,6 +351,6 @@ export async function fetchOtbGames(
 }
 
 /** Strip a scraped slug ("mumbai-open-2024") down to searchable words. */
-function slugToQuery(slug: string): string {
+export function slugToQuery(slug: string): string {
   return slug.replace(/[-_]+/g, " ").trim();
 }
