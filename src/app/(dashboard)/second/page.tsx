@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Brain, Loader2, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SOURCE_LABEL } from "@/lib/second/types";
+import { MAX_PASTED_GAMES } from "@/lib/validations/phase4";
 import type { OpponentSource } from "@/lib/second/types";
 
 type ProfileStatus = "pending" | "processing" | "complete" | "failed";
@@ -58,6 +59,9 @@ export default function SecondPage() {
   /** 1..5 accounts, all describing the same human. */
   const [accounts, setAccounts] = useState<AccountRow[]>([{ handle: "", source: "LICHESS" }]);
   const [colorToPlay, setColorToPlay] = useState<"white" | "black">("white");
+  const [fideId, setFideId] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [pastedPgn, setPastedPgn] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -171,13 +175,32 @@ export default function SecondPage() {
       return;
     }
 
+    const pasted = pastedPgn.trim();
+    if (pasted) {
+      const gameCount = (pasted.match(/\[Event\b/gi) ?? []).length || 1;
+      if (gameCount > MAX_PASTED_GAMES) {
+        setFormError(`Paste at most ${MAX_PASTED_GAMES} games (found ${gameCount}).`);
+        return;
+      }
+      if (!playerName.trim() && !fideId.trim()) {
+        setFormError("Add the opponent's name (or FIDE ID) so we know which side is theirs.");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setFormError(null);
     try {
       const response = await fetch("/api/second/profiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts: filled, colorToPlay }),
+        body: JSON.stringify({
+          accounts: filled,
+          colorToPlay,
+          fideId: fideId.trim() || undefined,
+          playerName: playerName.trim() || undefined,
+          pastedPgn: pasted || undefined,
+        }),
       });
       const data = await response.json();
       if (!response.ok || !data.success) {
@@ -186,6 +209,9 @@ export default function SecondPage() {
       }
       setIsModalOpen(false);
       setAccounts([{ handle: "", source: "LICHESS" }]);
+      setFideId("");
+      setPlayerName("");
+      setPastedPgn("");
       await loadProfiles();
       startPolling();
     } catch {
@@ -320,7 +346,7 @@ export default function SecondPage() {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="card w-full max-w-md border border-kca-border bg-kca-surface p-6">
+          <div className="card max-h-[90vh] w-full max-w-md overflow-y-auto border border-kca-border bg-kca-surface p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-display font-bold text-kca-white">Profile an opponent</h2>
               <button onClick={() => setIsModalOpen(false)} className="text-kca-gray-400 hover:text-kca-white">
@@ -335,9 +361,12 @@ export default function SecondPage() {
                 </label>
                 <div className="space-y-2">
                   {accounts.map((account, index) => (
-                    <div key={index} className="flex items-center gap-2">
+                    <div
+                      key={index}
+                      className="grid grid-cols-[7.5rem_minmax(0,1fr)_auto] items-center gap-2"
+                    >
                       <select
-                        className="input-field w-32 shrink-0 py-2 text-sm"
+                        className="input-field py-2 text-sm"
                         value={account.source}
                         onChange={(e) => updateAccount(index, { source: e.target.value as Site })}
                         aria-label={`Site for account ${index + 1}`}
@@ -346,22 +375,24 @@ export default function SecondPage() {
                         <option value="CHESSCOM">Chess.com</option>
                       </select>
                       <input
-                        className="input-field min-w-0 flex-1 py-2 text-sm"
+                        className="input-field py-2 text-sm"
                         value={account.handle}
                         onChange={(e) => updateAccount(index, { handle: e.target.value })}
-                        placeholder={index === 0 ? "e.g. DrNykterstein" : "Another account"}
+                        placeholder={index === 0 ? "their username" : "another username"}
                         aria-label={`Username for account ${index + 1}`}
                         autoFocus={index === 0}
                       />
-                      {accounts.length > 1 && (
+                      {accounts.length > 1 ? (
                         <button
                           type="button"
                           onClick={() => setAccounts((c) => c.filter((_, i) => i !== index))}
-                          className="shrink-0 rounded-lg p-2 text-kca-gray-400 hover:text-kca-danger"
+                          className="rounded-lg p-2 text-kca-gray-400 hover:text-kca-danger"
                           aria-label={`Remove account ${index + 1}`}
                         >
                           <X className="h-4 w-4" />
                         </button>
+                      ) : (
+                        <span className="w-8" aria-hidden />
                       )}
                     </div>
                   ))}
@@ -380,8 +411,57 @@ export default function SecondPage() {
                 <p className="mt-2 text-xs text-kca-gray-500">
                   Add every account the same player uses — up to {MAX_ACCOUNTS}, across both sites.
                   Their games are merged into one dossier, so a player who plays rapid on Lichess
-                  and blitz on Chess.com is profiled from all of it. FIDE has no public game
-                  database, so preparation needs at least one online account.
+                  and blitz on Chess.com is profiled from all of it. At least one online account is
+                  required; the two options below add to it.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                  FIDE ID — over-the-board games (optional)
+                </label>
+                <input
+                  className="input-field py-2 text-sm"
+                  value={fideId}
+                  onChange={(e) => setFideId(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  placeholder="e.g. 46608524"
+                  aria-label="FIDE ID"
+                />
+                <p className="mt-1.5 text-xs text-kca-gray-500">
+                  Pulls their real tournament games from Lichess broadcasts, matched exactly by FIDE
+                  ID. Leave blank to skip.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                  Opponent&rsquo;s name (for pasted / OTB games)
+                </label>
+                <input
+                  className="input-field py-2 text-sm"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  placeholder="e.g. Kapadi Yash"
+                  aria-label="Opponent's name"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                  Paste games (optional, up to {MAX_PASTED_GAMES})
+                </label>
+                <textarea
+                  className="input-field min-h-[7rem] resize-y py-2 font-mono text-xs leading-relaxed"
+                  value={pastedPgn}
+                  onChange={(e) => setPastedPgn(e.target.value)}
+                  placeholder={"[Event \"...\"]\n[White \"...\"]\n[Black \"...\"]\n1. e4 e5 ..."}
+                  aria-label="Paste PGN games"
+                  spellCheck={false}
+                />
+                <p className="mt-1.5 text-xs text-kca-gray-500">
+                  Paste one or more games in PGN. Each game needs a date, and the opponent&rsquo;s
+                  name (above) or FIDE ID so we know which side is theirs.
                 </p>
               </div>
 

@@ -592,10 +592,20 @@ async function mapWithConcurrency<T, R>(
  */
 export async function fetchOpponentGamesMulti(
   accounts: AccountRef[],
-  options: { perAccountMax?: number; totalMax?: number; signal?: AbortSignal; fideId?: string } = {},
+  options: {
+    perAccountMax?: number;
+    totalMax?: number;
+    signal?: AbortSignal;
+    fideId?: string;
+    /** Pre-parsed pasted games, injected as a MANUAL account. */
+    manualGames?: RawGame[];
+    /** Display name for the manual/OTB sources. */
+    manualName?: string;
+  } = {},
 ): Promise<MergedIngestResult> {
   const perAccountMax = options.perAccountMax ?? DEFAULT_MAX;
-  const sourceCount = accounts.length + (options.fideId ? 1 : 0);
+  const manualCount = options.manualGames?.length ? 1 : 0;
+  const sourceCount = accounts.length + (options.fideId ? 1 : 0) + manualCount;
   const totalMax = options.totalMax ?? perAccountMax * Math.max(1, sourceCount);
 
   const fetched = await mapWithConcurrency(accounts, ACCOUNT_CONCURRENCY, (account) =>
@@ -612,6 +622,14 @@ export async function fetchOpponentGamesMulti(
     fetched.push({
       account: { handle: options.fideId, source: "BROADCAST", displayName: otb.playerName },
       raw: { games: otb.games, ratingSummary: otb.ratingSummary, status: "ok" },
+    });
+  }
+
+  // Pasted games enter as one MANUAL account, synthetic handle "pasted".
+  if (options.manualGames?.length) {
+    fetched.push({
+      account: { handle: "pasted", source: "MANUAL", displayName: options.manualName ?? null },
+      raw: { games: options.manualGames, ratingSummary: [], status: "ok" },
     });
   }
 
@@ -664,8 +682,9 @@ export async function fetchOpponentGamesMulti(
   // below the budget cutoff and silently drop the games that matter MOST for
   // over-the-board preparation. Trim only the online games down to the budget.
   pool.sort((a, b) => b.playedAtMs - a.playedAtMs);
-  const otbPool = pool.filter((g) => g.account.source === "BROADCAST");
-  const onlinePool = pool.filter((g) => g.account.source !== "BROADCAST");
+  const protectedSources = new Set(["BROADCAST", "MANUAL"]);
+  const otbPool = pool.filter((g) => protectedSources.has(g.account.source));
+  const onlinePool = pool.filter((g) => !protectedSources.has(g.account.source));
   const onlineBudget = Math.max(0, totalMax - otbPool.length);
   if (onlinePool.length > onlineBudget) {
     diagnostics.budgetTrimmed = onlinePool.length - onlineBudget;

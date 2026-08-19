@@ -478,6 +478,12 @@ model OpponentProfile {
   handle        String
   source        OpponentSource
   fideId        String?
+  /// Real name of the opponent, used to pick their side in pasted OTB games
+  /// and as the display label for OTB/manual sources. Null for online-only.
+  playerName    String?
+  /// Raw PGN the user pasted (up to 15 games), kept so a regenerate reuses the
+  /// same games without asking for them again.
+  pastedPgn     String?         @db.Text
   colorToPlay   String          @default("white") // side WE play against them
   status        String          @default("pending")
   gamesAnalyzed Int             @default(0)
