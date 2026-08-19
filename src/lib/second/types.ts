@@ -374,6 +374,8 @@ export type ProfileArtifact = {
   tactical?: TacticalProfile;
   /** Absent on dossiers generated before behavioural profiling existed. */
   behaviour?: BehaviouralProfile;
+  /** How their play changed over time. Absent on older dossiers. */
+  evolution?: EvolutionProfile;
   /** True when Neo4j was available and the transposition pass ran. */
   graphUsed: boolean;
   /**
@@ -463,6 +465,54 @@ export type BehaviouralProfile = {
     shareLow: number;
     shareHigh: number;
   }[];
+};
+
+/** One time-era slice of the opponent's play. Only eras clearing the sample
+ *  thresholds appear. See evolution.ts. */
+export type EvolutionEra = {
+  /** Calendar year, e.g. "2024". */
+  label: string;
+  games: number;
+  moves: number;
+  /** (wins + draws/2) / games, as a percentage. Their result, not their accuracy. */
+  scorePct: number | null;
+  /** Mean of their own rating in that era's games, when known (OTB carries it). */
+  meanRating: number | null;
+  accuracy: number;
+  accuracyLow: number;
+  accuracyHigh: number;
+  blunderRate: number;
+  blunderRateLow: number;
+  blunderRateHigh: number;
+};
+
+/** A trend stated ONLY because the two eras' intervals do not overlap. */
+export type EvolutionTrend = {
+  metric: "accuracy" | "blunderRate" | "rating";
+  direction: "up" | "down";
+  from: string;
+  to: string;
+  detail: string;
+};
+
+/** An opening family that entered or left the repertoire between the first and
+ *  last qualifying era. */
+export type RepertoireShift = {
+  color: "w" | "b";
+  opening: string;
+  fromShare: number;
+  toShare: number;
+  direction: "adopted" | "abandoned";
+};
+
+/** How the opponent has changed with time. Absent on dossiers built before this
+ *  existed, or when there is only one qualifying era (`insufficient`). */
+export type EvolutionProfile = {
+  eras: EvolutionEra[];
+  trends: EvolutionTrend[];
+  repertoireShifts: RepertoireShift[];
+  /** True when fewer than two eras cleared the thresholds — no trend possible. */
+  insufficient: boolean;
 };
 
 /** Absent on dossiers generated before tactical profiling existed. */

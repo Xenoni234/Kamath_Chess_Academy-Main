@@ -65,6 +65,27 @@ export function renderDossierHtml(
     })
     .join("");
 
+  const evolution = artifact.evolution;
+  const evolutionRows =
+    evolution && !evolution.insufficient && evolution.eras.length >= 2
+      ? evolution.eras
+          .map(
+            (e) =>
+              `<tr><td>${htmlEscape(e.label)}</td><td>${e.games}</td><td>${e.accuracy.toFixed(1)}% <span class="muted">[${e.accuracyLow.toFixed(0)}\u2013${e.accuracyHigh.toFixed(0)}]</span></td><td>${(e.blunderRate * 100).toFixed(0)}%</td><td>${e.scorePct !== null ? `${e.scorePct.toFixed(0)}%` : "\u2014"}</td><td>${e.meanRating ?? "\u2014"}</td></tr>`,
+          )
+          .join("")
+      : "";
+  const evolutionTrends =
+    evolution && !evolution.insufficient
+      ? evolution.trends.map((t) => htmlEscape(t.detail.charAt(0).toUpperCase() + t.detail.slice(1)))
+          .concat(
+            evolution.repertoireShifts.map(
+              (r) =>
+                `As ${r.color === "w" ? "White" : "Black"}, ${htmlEscape(r.direction === "abandoned" ? "stopped playing" : "took up")} the ${htmlEscape(r.opening)}`,
+            ),
+          )
+      : [];
+
   const behaviour = artifact.behaviour;
   const behaviourRows = behaviour
     ? [
@@ -237,6 +258,18 @@ export function renderDossierHtml(
     <tbody>${behaviourRows}</tbody>
   </table>
   <p class="muted">Measured over ${artifact.behaviour?.movesGraded ?? 0} of their own moves across ${artifact.behaviour?.gamesScanned ?? 0} games. These are patterns in how they have played, not claims about what they think or feel — a gap smaller than the ranges shown is not yet a real difference. Buckets under ${artifact.behaviour?.minSamples ?? 25} moves are omitted.</p>`
+      : ""
+  }
+
+  ${
+    evolutionRows
+      ? `<h2>How their play has changed</h2>
+  ${evolutionTrends.length ? `<ul>${evolutionTrends.map((t) => `<li>${t}.</li>`).join("")}</ul>` : `<p class="muted">No single trend is statistically clear — the year-to-year ranges overlap, so their level has held rather than visibly shifted.</p>`}
+  <table>
+    <thead><tr><th>Year</th><th>Games</th><th>Accuracy</th><th>Blunders</th><th>Score</th><th>Rating</th></tr></thead>
+    <tbody>${evolutionRows}</tbody>
+  </table>
+  <p class="muted">The same measurements split by year. A trend is stated only where two years' ranges do not overlap; nothing here claims to know why their play changed.</p>`
       : ""
   }
 

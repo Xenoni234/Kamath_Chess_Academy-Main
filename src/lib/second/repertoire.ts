@@ -143,6 +143,25 @@ export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLin
         .join("\n")
     : "";
 
+  const ev = artifact.evolution;
+  const evolutionBlock =
+    ev && !ev.insufficient && ev.eras.length >= 2
+      ? [
+          "By year (same measurements, sliced by time):",
+          ...ev.eras.map(
+            (e) =>
+              `- ${e.label}: ${e.accuracy.toFixed(1)}% accuracy [${e.accuracyLow.toFixed(0)}-${e.accuracyHigh.toFixed(0)}] over ${e.moves} moves, ${(e.blunderRate * 100).toFixed(0)}% blunders, scored ${e.scorePct !== null ? `${e.scorePct.toFixed(0)}%` : "n/a"}${e.meanRating !== null ? `, rated ~${e.meanRating}` : ""}`,
+          ),
+          ev.trends.length
+            ? `Clear trends (intervals do not overlap): ${ev.trends.map((t) => t.detail).join("; ")}`
+            : "No single trend is statistically clear — the year-to-year ranges overlap, so say their level has held rather than shifted.",
+          ...ev.repertoireShifts.map(
+            (r) =>
+              `Repertoire as ${r.color === "w" ? "White" : "Black"}: ${r.direction} the ${r.opening} (${(r.fromShare * 100).toFixed(0)}% -> ${(r.toShare * 100).toFixed(0)}%).`,
+          ),
+        ].join("\n")
+      : "";
+
   const transpositions = artifact.transpositions
     .slice(0, 3)
     .map((t) => `- ${t.bypass.join(" ")} (instead of their usual ${t.mainLine.join(" ")})`)
@@ -185,6 +204,9 @@ ${tactical || "- not enough evidence to report any tactical pattern"}
 
 Behavioural patterns (${artifact.behaviour?.movesGraded ?? 0} of their moves across ${artifact.behaviour?.gamesScanned ?? 0} games). These are CORRELATIONS over their own games, not psychology: describe what the numbers show and never assert what they feel or intend. Quote sample sizes. Where a comparison is small or the gap narrow, say it is not yet meaningful:
 ${behaviourBlocks || "- not enough evidence to report any behavioural pattern"}
+
+How their play has changed over time. State a change ONLY where a clear trend is listed; where the ranges overlap, say their level has held. Never speculate about WHY it changed — you can measure that it did, not the cause:
+${evolutionBlock || "- not enough games across enough years to compare eras"}
 
 Mined novelties (engine-strong, human-rare):
 ${novelties || "- none found"}
