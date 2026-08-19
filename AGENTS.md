@@ -219,7 +219,7 @@ tournaments. Tasks in order:
    noted in this file once it lands.
 2. **Manual PGN input** (up to 15 games) — `src/lib/second/pgnImport.ts`. ✅ splitter + ply-aligned clock/eval extraction done; paste UI pending.
 3. **OTB games from a FIDE ID**, via Lichess broadcasts — `src/lib/second/otb.ts`. ✅ done. The dead `fideId` field is now load-bearing: a FIDE id pulls the opponent's OTB games in as a `BROADCAST` account. Increment is **inferred from rising clocks** (OTB PGN has no `[TimeControl]`) and flagged `incrementInferred`; OTB games are **exempt from the recency budget trim** (scarce and old, but the most valuable for prep) and **excluded from the "how losses end" breakdown** (broadcast PGN has no `[Termination]`). Discovery scrapes `/fide/{id}/redirect` and **degrades to a name search** if that yields nothing. Live chain needs outbound network (the sandbox blocks it); verified offline against a real 90-game broadcast PGN.
-4. **Style evolution over time** — the same metrics bucketed by era.
+4. **Style evolution over time** — `src/lib/second/evolution.ts`. ✅ done. Buckets the scanned games by calendar-year era and recomputes the SAME metrics per era (accuracy, blunder rate, score, rating, repertoire share). A trend is stated **only when the two eras' confidence intervals do not overlap** — 88%±4 vs 91%±5 is not a trend and is never reported as one. Repertoire shifts (a line abandoned/adopted between the first and last era) are flagged. It never claims *why* the play changed. Fed into the AI narrative, UI, and PDF.
 5. **`logic.md`** — the whole Second AI explained for a chess player.
 
 ### Phase 6 — Video classes 📋 PLANNED
@@ -495,6 +495,7 @@ npx tsx --env-file=.env.local scripts/dryRunDossier.ts         # full artifact +
 npx tsx --env-file=.env.local scripts/e2eProfileJob.ts         # the real job incl. persistence; creates and deletes its own dossier
 npx tsx scripts/verifyOtb.ts <fideId> <broadcast.pgn>          # OTB identity + increment inference, offline against a PGN
 npx tsx --env-file=.env.local scripts/verifyOtb.ts <fideId>    # OTB full live chain against Lichess broadcasts
+npx tsx scripts/verifyEvolution.ts                             # style-evolution trend gating (synthetic, no engine/network)
 npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})
 npx tsc --noEmit     # type check, must pass with zero errors
 npm run build        # production build — the strictest gate

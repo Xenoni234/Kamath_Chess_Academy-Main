@@ -10,6 +10,7 @@ import { detectWeaknesses } from "@/lib/second/weakness";
 import { scanGames } from "@/lib/second/scan";
 import { profileTactics } from "@/lib/second/tactics";
 import { profileBehaviour } from "@/lib/second/behaviour";
+import { profileEvolution } from "@/lib/second/evolution";
 import { runGraphStage } from "@/lib/second/graph";
 import { mineNovelties, type NoveltyTarget } from "@/lib/second/novelty";
 import { buildRepertoireLines, describeArtifact } from "@/lib/second/repertoire";
@@ -229,14 +230,18 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
     // sections, not the dossier.
     let tactical;
     let behaviour;
+    let evolution;
     try {
       const scan = await scanGames(games, theirColor);
       tactical = profileTactics(scan.moves, scan.games.length);
       behaviour = profileBehaviour(scan.games, scan.moves);
+      // Same scan, sliced by era. Cheap — no extra engine work.
+      evolution = profileEvolution(scan.games, scan.moves);
     } catch (error) {
       console.error("[second] whole-game scan failed:", error);
       tactical = undefined;
       behaviour = undefined;
+      evolution = undefined;
     }
 
     timer.mark("tactical+behavioural scan");
@@ -268,6 +273,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
       novelties,
       tactical,
       behaviour,
+      evolution,
       graphUsed,
       graphSkipReason,
     };

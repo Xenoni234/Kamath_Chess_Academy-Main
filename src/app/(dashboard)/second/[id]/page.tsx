@@ -17,6 +17,7 @@ import {
   Swords,
   Target,
   Trash2,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SOURCE_LABEL } from "@/lib/second/types";
@@ -145,11 +146,30 @@ type BehaviouralProfile = {
   terminations: { termination: string; label: string; count: number; share: number }[];
 };
 
+type EvolutionEra = {
+  label: string;
+  games: number;
+  moves: number;
+  scorePct: number | null;
+  meanRating: number | null;
+  accuracy: number;
+  accuracyLow: number;
+  accuracyHigh: number;
+  blunderRate: number;
+};
+type EvolutionProfile = {
+  eras: EvolutionEra[];
+  trends: { metric: string; direction: string; from: string; to: string; detail: string }[];
+  repertoireShifts: { color: "w" | "b"; opening: string; fromShare: number; toShare: number; direction: string }[];
+  insufficient: boolean;
+};
+
 type Artifact = {
   handle: string;
   source: OpponentSource;
   tactical?: TacticalProfile;
   behaviour?: BehaviouralProfile;
+  evolution?: EvolutionProfile;
   /** Absent on older, single-account dossiers. */
   accounts?: ArtifactAccount[];
   ingest?: IngestDiagnostics;
@@ -771,6 +791,83 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             hidden rather than shown as a percentage.
             {!a.behaviour.clockDataAvailable &&
               " Clock-based sections are hidden: too few of these games carried usable clock data."}
+          </p>
+        </Section>
+      )}
+
+      {a?.evolution && !a.evolution.insufficient && a.evolution.eras.length >= 2 && (
+        <Section title="How their play has changed" icon={TrendingUp}>
+          {a.evolution.trends.length > 0 ? (
+            <div className="mb-3 space-y-1.5">
+              {a.evolution.trends.map((t, i) => (
+                <div
+                  key={i}
+                  className="card border border-kca-border bg-kca-surface px-4 py-2.5 text-sm text-kca-gray-100"
+                >
+                  {t.detail.charAt(0).toUpperCase() + t.detail.slice(1)}.
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mb-3 text-sm text-kca-gray-400">
+              No single trend is statistically clear across these eras — the year-to-year ranges
+              overlap, so their level has held rather than visibly shifted.
+            </p>
+          )}
+
+          {a.evolution.repertoireShifts.length > 0 && (
+            <div className="mb-3 space-y-1.5">
+              {a.evolution.repertoireShifts.map((r, i) => (
+                <div key={i} className="text-sm text-kca-gray-300">
+                  As {r.color === "w" ? "White" : "Black"}, they{" "}
+                  {r.direction === "abandoned" ? "stopped playing" : "took up"} the{" "}
+                  <span className="text-kca-white">{r.opening}</span>{" "}
+                  {r.direction === "abandoned"
+                    ? `(${(r.fromShare * 100).toFixed(0)}% of games in ${a.evolution!.eras[0].label} → gone by ${a.evolution!.eras[a.evolution!.eras.length - 1].label})`
+                    : `(new since ${a.evolution!.eras[0].label}, now ${(r.toShare * 100).toFixed(0)}%)`}
+                  .
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-kca-gray-500">
+                  <th className="py-1 pr-4">Year</th>
+                  <th className="py-1 pr-4">Games</th>
+                  <th className="py-1 pr-4">Accuracy</th>
+                  <th className="py-1 pr-4">Blunders</th>
+                  <th className="py-1 pr-4">Score</th>
+                  <th className="py-1">Rating</th>
+                </tr>
+              </thead>
+              <tbody>
+                {a.evolution.eras.map((e) => (
+                  <tr key={e.label} className="border-t border-kca-border">
+                    <td className="py-1.5 pr-4 text-kca-white">{e.label}</td>
+                    <td className="py-1.5 pr-4 text-kca-gray-300">{e.games}</td>
+                    <td className="py-1.5 pr-4 text-kca-gray-300">
+                      {e.accuracy.toFixed(1)}%{" "}
+                      <span className="text-kca-gray-500">
+                        [{e.accuracyLow.toFixed(0)}–{e.accuracyHigh.toFixed(0)}]
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-4 text-kca-gray-300">{(e.blunderRate * 100).toFixed(0)}%</td>
+                    <td className="py-1.5 pr-4 text-kca-gray-300">
+                      {e.scorePct !== null ? `${e.scorePct.toFixed(0)}%` : "—"}
+                    </td>
+                    <td className="py-1.5 text-kca-gray-300">{e.meanRating ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-kca-gray-500">
+            The same measurements, split by year. A trend is stated only when two years&rsquo; ranges
+            do not overlap — a smaller gap is not yet a real change, and nothing here claims to know
+            why their play changed.
           </p>
         </Section>
       )}
