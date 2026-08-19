@@ -105,7 +105,7 @@ function stageTimer() {
 }
 
 async function runProfileJobInner(data: ProfileJobData): Promise<void> {
-  const { profileId, requestedById, handle, source, colorToPlay } = data;
+  const { profileId, requestedById, handle, source, colorToPlay, fideId } = data;
   // Jobs enqueued before multi-account support carry only handle/source, and
   // those payloads are JSON sitting in Redis — a deploy landing while jobs are
   // queued must not crash the worker.
@@ -125,6 +125,8 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
         perAccountMax: PER_ACCOUNT_MAX,
         totalMax: inline ? INLINE_TOTAL_MAX : TOTAL_MAX,
         signal: ingestAbort.signal,
+        // A FIDE id pulls the opponent's OTB games in as a BROADCAST account.
+        fideId: fideId || undefined,
       });
     } finally {
       clearTimeout(ingestTimer);

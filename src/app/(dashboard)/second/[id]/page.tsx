@@ -90,6 +90,7 @@ type IngestDiagnostics = {
   budgetTrimmed: number;
   clocksDiscardedMisaligned: number;
   budgetReduced?: boolean;
+  otbNote?: string | null;
 };
 
 type MotifStat = {
@@ -140,6 +141,7 @@ type BehaviouralProfile = {
   tilt: BehaviourBucket[];
   structures: BehaviourBucket[];
   lossesAnalyzed: number;
+  otbLossesExcluded?: number;
   terminations: { termination: string; label: string; count: number; share: number }[];
 };
 
@@ -627,6 +629,10 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             </p>
           )}
 
+          {a.ingest?.otbNote && (
+            <p className="mt-1.5 text-xs text-kca-warning">Over-the-board games: {a.ingest.otbNote}.</p>
+          )}
+
           {a.clockBasis && (
             <p className="mt-1.5 text-xs text-kca-gray-500">
               {a.clockBasis.initialSec
@@ -731,6 +737,13 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
                 How their {a.behaviour.lossesAnalyzed} losses ended
               </div>
+              {(a.behaviour.otbLossesExcluded ?? 0) > 0 && (
+                <div className="mb-1.5 text-xs text-kca-gray-500">
+                  {a.behaviour.otbLossesExcluded} over-the-board loss
+                  {a.behaviour.otbLossesExcluded === 1 ? "" : "es"} excluded — broadcast PGN records no
+                  termination.
+                </div>
+              )}
               <div className="space-y-1.5">
                 {a.behaviour.terminations.map((t) => (
                   <div

@@ -190,7 +190,13 @@ export function profileBehaviour(
     .sort((a, b) => a.accuracy - b.accuracy);
 
   // --- How their losses end ------------------------------------------------
-  const losses = games.filter((g) => !g.won && !g.drawn);
+  // OTB (broadcast) games carry no [Termination] tag, so their termination is
+  // "unknown" not because the game was unrecorded but because the source cannot
+  // say. Including them would swell an "Unrecorded" bucket that reads like a
+  // behavioural signal. Exclude them and report the count instead.
+  const allLosses = games.filter((g) => !g.won && !g.drawn);
+  const otbLossesExcluded = allLosses.filter((g) => g.account.source === "BROADCAST").length;
+  const losses = allLosses.filter((g) => g.account.source !== "BROADCAST");
   const terminationCounts = new Map<string, number>();
   for (const loss of losses) {
     terminationCounts.set(loss.termination, (terminationCounts.get(loss.termination) ?? 0) + 1);
@@ -222,6 +228,7 @@ export function profileBehaviour(
     tilt,
     structures,
     lossesAnalyzed: losses.length,
+    otbLossesExcluded,
     terminations,
   };
 }
