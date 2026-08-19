@@ -7,6 +7,9 @@ import { z } from "zod";
 /** Up to this many online accounts may be merged into one dossier. */
 export const MAX_PROFILE_ACCOUNTS = 5;
 
+/** Up to this many games may be pasted in one dossier. */
+export const MAX_PASTED_GAMES = 15;
+
 /**
  * One online account.
  *
@@ -41,7 +44,17 @@ export const createProfileSchema = z
     handle: z.string().trim().min(1).max(64).optional(),
     source: z.enum(["LICHESS", "CHESSCOM"]).optional(),
     colorToPlay: z.enum(["white", "black"]).default("white"),
-    fideId: z.string().trim().max(20).optional(),
+    fideId: z
+      .string()
+      .trim()
+      .max(20)
+      .regex(/^\d*$/, "A FIDE ID is digits only")
+      .optional(),
+    /** Opponent's real name — used to pick their side in pasted OTB games. */
+    playerName: z.string().trim().max(80).optional(),
+    /** Raw PGN, up to MAX_PASTED_GAMES games. Capped in bytes here; the game
+     *  count is checked in the refine below so the error is specific. */
+    pastedPgn: z.string().max(300_000).optional(),
   })
   .superRefine((value, ctx) => {
     const accounts =
@@ -55,6 +68,26 @@ export const createProfileSchema = z
         message: "Add at least one Lichess or Chess.com account",
       });
       return;
+    }
+
+    // Pasted games must not exceed the cap, and need an identity (a name or FIDE
+    // id) so we can tell which side the opponent was on.
+    if (value.pastedPgn && value.pastedPgn.trim()) {
+      const gameCount = (value.pastedPgn.match(/\[Event\b/gi) ?? []).length || 1;
+      if (gameCount > MAX_PASTED_GAMES) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["pastedPgn"],
+          message: `Paste at most ${MAX_PASTED_GAMES} games (found ${gameCount})`,
+        });
+      }
+      if (!value.playerName?.trim() && !value.fideId?.trim()) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["playerName"],
+          message: "Add the opponent's name (or FIDE ID) so we know which side is theirs",
+        });
+      }
     }
 
     // Case-insensitively, because Postgres unique indexes are case-sensitive and
@@ -83,6 +116,8 @@ export const createProfileSchema = z
       accounts,
       colorToPlay: value.colorToPlay,
       fideId: value.fideId,
+      playerName: value.playerName,
+      pastedPgn: value.pastedPgn,
     };
   });
 

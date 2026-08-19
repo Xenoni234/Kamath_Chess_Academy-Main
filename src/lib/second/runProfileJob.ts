@@ -11,6 +11,8 @@ import { scanGames } from "@/lib/second/scan";
 import { profileTactics } from "@/lib/second/tactics";
 import { profileBehaviour } from "@/lib/second/behaviour";
 import { profileEvolution } from "@/lib/second/evolution";
+import { importPastedPgn } from "@/lib/second/pgnImport";
+import { MAX_PASTED_GAMES } from "@/lib/validations/phase4";
 import { runGraphStage } from "@/lib/second/graph";
 import { mineNovelties, type NoveltyTarget } from "@/lib/second/novelty";
 import { buildRepertoireLines, describeArtifact } from "@/lib/second/repertoire";
@@ -106,7 +108,7 @@ function stageTimer() {
 }
 
 async function runProfileJobInner(data: ProfileJobData): Promise<void> {
-  const { profileId, requestedById, handle, source, colorToPlay, fideId } = data;
+  const { profileId, requestedById, handle, source, colorToPlay, fideId, playerName, pastedPgn } = data;
   // Jobs enqueued before multi-account support carry only handle/source, and
   // those payloads are JSON sitting in Redis — a deploy landing while jobs are
   // queued must not crash the worker.
@@ -122,12 +124,30 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
     const ingestTimer = setTimeout(() => ingestAbort.abort(), INGEST_TIMEOUT_MS);
     let merged;
     try {
+      // Pasted games are parsed here so their rejections can be logged; identity
+      // comes from the FIDE id when present, else the entered name.
+      const manual = pastedPgn?.trim()
+        ? importPastedPgn(pastedPgn, {
+            playerFideId: fideId || undefined,
+            playerName: playerName || undefined,
+            max: MAX_PASTED_GAMES,
+          })
+        : { games: [], rejected: [] };
+      if (manual.rejected.length) {
+        console.warn(
+          `[second] ${manual.rejected.length} pasted game(s) rejected:`,
+          manual.rejected.map((r) => `${r.label}: ${r.reason}`).join("; "),
+        );
+      }
+
       merged = await fetchOpponentGamesMulti(accounts, {
         perAccountMax: PER_ACCOUNT_MAX,
         totalMax: inline ? INLINE_TOTAL_MAX : TOTAL_MAX,
         signal: ingestAbort.signal,
         // A FIDE id pulls the opponent's OTB games in as a BROADCAST account.
         fideId: fideId || undefined,
+        manualGames: manual.games,
+        manualName: playerName || undefined,
       });
     } finally {
       clearTimeout(ingestTimer);

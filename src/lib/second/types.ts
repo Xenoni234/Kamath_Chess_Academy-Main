@@ -544,4 +544,8 @@ export type ProfileJobData = {
   source: OpponentSource;
   colorToPlay: Color;
   fideId?: string;
+  /** Opponent's real name — identifies their side in pasted games. */
+  playerName?: string;
+  /** Raw PGN the user pasted (up to 15 games). */
+  pastedPgn?: string;
 };

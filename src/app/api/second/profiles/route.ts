@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { accounts, colorToPlay, fideId } = parsed.data;
+  const { accounts, colorToPlay, fideId, playerName, pastedPgn } = parsed.data;
   const primary = accounts[0];
 
   // A dossier now pulls up to 1000 games and runs a pool of engines. Several at
@@ -107,6 +107,8 @@ export async function POST(request: NextRequest) {
       source: primary.source,
       colorToPlay,
       fideId: fideId || null,
+      playerName: playerName || null,
+      pastedPgn: pastedPgn || null,
       status: "pending",
       accounts: {
         create: accounts.map((account, position) => ({ ...account, position })),
@@ -131,6 +133,8 @@ export async function POST(request: NextRequest) {
     source: primary.source,
     colorToPlay,
     fideId: fideId || undefined,
+    playerName: playerName || undefined,
+    pastedPgn: pastedPgn || undefined,
   });
 
   return NextResponse.json({ success: true, profileId: profile.id }, { status: 201 });

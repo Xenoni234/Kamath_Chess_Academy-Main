@@ -40,6 +40,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       source: true,
       colorToPlay: true,
       fideId: true,
+      playerName: true,
+      pastedPgn: true,
       accounts: {
         select: { handle: true, source: true },
         orderBy: { position: "asc" },
@@ -94,6 +96,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     // Stored as a plain String column, so narrow it rather than casting.
     colorToPlay: profile.colorToPlay === "black" ? "black" : "white",
     fideId: profile.fideId || undefined,
+    playerName: profile.playerName || undefined,
+    pastedPgn: profile.pastedPgn || undefined,
   });
 
   return NextResponse.json({ success: true, status: "pending" }, { status: 202 });
