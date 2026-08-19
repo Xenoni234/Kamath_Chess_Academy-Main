@@ -205,7 +205,7 @@ reaching the same Four Knights position. Note `transpositions: 0` is a normal
 result on a small sample: the query only reports a bypass when a *weak* position
 is reachable by two or more distinct move-orders in their own games.
 
-### Phase 5 — Digital Second: OTB, manual games, evolution 🔨 IN PROGRESS
+### Phase 5 — Digital Second: OTB, manual games, evolution 🔨 IN PROGRESS (tasks 2-5 done; task 1 Supabase migration blocked on the user; manual-paste UI still pending)
 Extends Phase 4 from online-usernames-only to the games that actually decide
 tournaments. Tasks in order:
 
@@ -220,7 +220,7 @@ tournaments. Tasks in order:
 2. **Manual PGN input** (up to 15 games) — `src/lib/second/pgnImport.ts`. ✅ splitter + ply-aligned clock/eval extraction done; paste UI pending.
 3. **OTB games from a FIDE ID**, via Lichess broadcasts — `src/lib/second/otb.ts`. ✅ done. The dead `fideId` field is now load-bearing: a FIDE id pulls the opponent's OTB games in as a `BROADCAST` account. Increment is **inferred from rising clocks** (OTB PGN has no `[TimeControl]`) and flagged `incrementInferred`; OTB games are **exempt from the recency budget trim** (scarce and old, but the most valuable for prep) and **excluded from the "how losses end" breakdown** (broadcast PGN has no `[Termination]`). Discovery scrapes `/fide/{id}/redirect` and **degrades to a name search** if that yields nothing. Live chain needs outbound network (the sandbox blocks it); verified offline against a real 90-game broadcast PGN.
 4. **Style evolution over time** — `src/lib/second/evolution.ts`. ✅ done. Buckets the scanned games by calendar-year era and recomputes the SAME metrics per era (accuracy, blunder rate, score, rating, repertoire share). A trend is stated **only when the two eras' confidence intervals do not overlap** — 88%±4 vs 91%±5 is not a trend and is never reported as one. Repertoire shifts (a line abandoned/adopted between the first and last era) are flagged. It never claims *why* the play changed. Fed into the AI narrative, UI, and PDF.
-5. **`logic.md`** — the whole Second AI explained for a chess player.
+5. **`logic.md`** — the whole Second AI explained for a chess player. ✅ done. Repo-root, plain language, all figures drawn from the code; 11 sections ending in the honest-limits list.
 
 ### Phase 6 — Video classes 📋 PLANNED
 Inbuilt group video via mediasoup WebRTC SFU (no third-party API), Socket.io
