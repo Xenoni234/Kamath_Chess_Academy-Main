@@ -8,11 +8,36 @@
  */
 import type { PositionNode } from "@/lib/engine/analysis";
 
-export type OpponentSource = "LICHESS" | "CHESSCOM";
+/**
+ * Where an opponent's games came from.
+ *
+ * LICHESS / CHESSCOM are online handles fetched from a public API. MANUAL is a
+ * batch of games pasted by the user (no API, no handle -- see pgnImport.ts).
+ * BROADCAST is an OTB game pulled from a Lichess broadcast via a FIDE ID.
+ *
+ * The last two carry no real "handle": a player name has spaces and commas that
+ * `accountSchema.handle` rejects, so they use a synthetic handle (the FIDE ID,
+ * or `pasted-{n}`) and put the readable name in `displayName`.
+ */
+export type OpponentSource = "LICHESS" | "CHESSCOM" | "MANUAL" | "BROADCAST";
+
+/** Sources the user can type a handle for in the account picker. The other two
+ *  arrive through paste / FIDE lookup, not a dropdown. */
+export type OnlineSource = "LICHESS" | "CHESSCOM";
+
+/** The one place a source becomes a human label. Keyed by the full union so
+ *  adding a source is a compile error here rather than a silent "Chess.com". */
+export const SOURCE_LABEL: Record<OpponentSource, string> = {
+  LICHESS: "Lichess",
+  CHESSCOM: "Chess.com",
+  MANUAL: "Pasted",
+  BROADCAST: "OTB (broadcast)",
+};
+
 export type Color = "white" | "black";
 
 /** One online account. A dossier merges 1..5 of them into a single opponent. */
-export type AccountRef = { handle: string; source: OpponentSource };
+export type AccountRef = { handle: string; source: OpponentSource; displayName?: string | null };
 
 /**
  * How a game ended, normalised across both sites.
@@ -174,6 +199,10 @@ export type WeightedGame = {
 export type ArtifactAccount = {
   handle: string;
   source: OpponentSource;
+  /** Human name for MANUAL/BROADCAST sources whose handle is synthetic
+   *  (a FIDE ID or `pasted-{n}`). Null for online accounts, where the handle
+   *  is already the readable name. */
+  displayName?: string | null;
   /** Returned by the API. */
   gamesFetched: number;
   /** Survived dedup and the total budget — what actually shaped the dossier. */

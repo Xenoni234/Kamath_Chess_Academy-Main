@@ -15,6 +15,7 @@ import { mineNovelties, type NoveltyTarget } from "@/lib/second/novelty";
 import { buildRepertoireLines, describeArtifact } from "@/lib/second/repertoire";
 import { extendAll } from "@/lib/second/extend";
 import { renderDossierPdf } from "@/lib/second/pdf";
+import { SOURCE_LABEL } from "@/lib/second/types";
 import type { ProfileArtifact, ProfileJobData } from "@/lib/second/types";
 
 /**
@@ -147,7 +148,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
                 : a.status === "error"
                   ? "could not be reached"
                   : "returned no games";
-          return `${a.handle} (${a.source === "LICHESS" ? "Lichess" : "Chess.com"}): ${reason}`;
+          return `${a.displayName ?? a.handle} (${SOURCE_LABEL[a.source]}): ${reason}`;
         })
         .join("; ");
       await db.opponentProfile.update({

@@ -7,6 +7,7 @@
  * them — it never invents the moves, so the repertoire stays chess-safe
  * whichever AI provider is active.
  */
+import { SOURCE_LABEL } from "@/lib/second/types";
 import type { ProfileArtifact, RepertoireLine } from "@/lib/second/types";
 
 /** Recommended lines, strongest targeting first. */
@@ -74,12 +75,12 @@ export function describeArtifact(artifact: ProfileArtifact, lines: RepertoireLin
     ? artifact.accounts
         .map(
           (a) =>
-            `${a.handle} (${a.source === "LICHESS" ? "Lichess" : "Chess.com"}, ${a.gamesUsed} games${
+            `${a.displayName ?? a.handle} (${SOURCE_LABEL[a.source]}, ${a.gamesUsed} games${
               a.meanWeight < 0.25 ? ", mostly old games — heavily discounted" : ""
             })`,
         )
         .join(", ")
-    : `${artifact.handle} (${artifact.source})`;
+    : `${artifact.handle} (${SOURCE_LABEL[artifact.source]})`;
 
   const weaknesses = artifact.weaknesses
     .slice(0, 6)

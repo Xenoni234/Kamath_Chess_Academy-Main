@@ -73,6 +73,8 @@ enum NotificationType {
 enum OpponentSource {
   LICHESS
   CHESSCOM
+  MANUAL
+  BROADCAST
 }
 
 model User {
@@ -511,6 +513,9 @@ model OpponentAccount {
   id        String          @id @default(cuid())
   profileId String
   handle    String
+  /// Readable name for MANUAL/BROADCAST accounts whose handle is synthetic
+  /// (a FIDE ID or pasted-{n}). Null for online accounts.
+  displayName String?
   source    OpponentSource
   /// 0 = primary; mirrors OpponentProfile.handle/source.
   position  Int             @default(0)
