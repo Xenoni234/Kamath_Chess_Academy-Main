@@ -94,7 +94,7 @@ export default function OpeningTrainerPage() {
 
       <div className="card mb-8">
         <div className="relative">
-          <label className="mb-1 block text-sm text-kca-text-muted">Opening name</label>
+          <label className="mb-1 block text-sm text-kca-gray-400">Opening name</label>
           <input
             className="input-field w-full"
             placeholder="e.g. Caro-Kann Defence, Evans Gambit, Fried Liver Attack"
@@ -107,19 +107,19 @@ export default function OpeningTrainerPage() {
             onKeyDown={(e) => e.key === "Enter" && build()}
           />
           {showList && candidates.length > 0 && (
-            <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-kca-border bg-kca-surface-elevated shadow-lg">
+            <ul className="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-auto rounded-lg border border-kca-border-bright bg-kca-surface-2 shadow-2xl">
               {candidates.map((c) => (
                 <li key={`${c.eco}-${c.name}`}>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-kca-input"
+                    className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-kca-surface-3"
                     onClick={() => {
                       setQuery(c.name);
                       setShowList(false);
                     }}
                   >
-                    <span className="text-sm text-kca-text-primary">{c.name}</span>
-                    <span className="ml-3 font-mono text-xs text-kca-text-muted">{c.eco}</span>
+                    <span className="text-sm text-kca-white">{c.name}</span>
+                    <span className="ml-3 font-mono text-xs text-kca-gray-400">{c.eco}</span>
                   </button>
                 </li>
               ))}
@@ -129,7 +129,7 @@ export default function OpeningTrainerPage() {
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <div>
-            <label className="mb-1 block text-sm text-kca-text-muted">You play</label>
+            <label className="mb-1 block text-sm text-kca-gray-400">You play</label>
             <select
               className="input-field"
               value={color}
@@ -148,15 +148,15 @@ export default function OpeningTrainerPage() {
 
       {saved.length > 0 && (
         <section className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold text-kca-text-primary">Your saved openings</h2>
+          <h2 className="mb-3 text-lg font-semibold text-kca-white">Your saved openings</h2>
           <RepertoireGrid rows={saved} />
         </section>
       )}
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold text-kca-text-primary">Recently generated</h2>
+        <h2 className="mb-3 text-lg font-semibold text-kca-white">Recently generated</h2>
         {recent.length === 0 ? (
-          <p className="text-sm text-kca-text-muted">Nothing yet — build your first repertoire above.</p>
+          <p className="text-sm text-kca-gray-400">Nothing yet — build your first repertoire above.</p>
         ) : (
           <RepertoireGrid rows={recent} />
         )}
@@ -172,17 +172,17 @@ function RepertoireGrid({ rows }: { rows: RepertoireRow[] }) {
         <Link
           key={r.id}
           href={`/dashboard/opening/${r.id}`}
-          className="card flex items-center justify-between transition hover:border-kca-accent"
+          className="card flex items-center justify-between transition hover:border-kca-cyan"
         >
           <div>
-            <div className="font-medium text-kca-text-primary">{r.name}</div>
-            <div className="text-xs text-kca-text-muted">
+            <div className="font-medium text-kca-white">{r.name}</div>
+            <div className="text-xs text-kca-gray-400">
               {r.eco ? `${r.eco} · ` : ""}
               You play {r.colorToPlay}
               {r.status !== "complete" ? ` · ${r.status}…` : ""}
             </div>
           </div>
-          <span className="text-kca-accent">→</span>
+          <span className="text-kca-cyan">→</span>
         </Link>
       ))}
     </div>

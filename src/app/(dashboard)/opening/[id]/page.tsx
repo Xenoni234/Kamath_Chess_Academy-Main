@@ -196,7 +196,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
   }
 
   if (!rep) {
-    return <div className="mx-auto max-w-3xl px-4 py-10 text-kca-text-muted">Loading…</div>;
+    return <div className="mx-auto max-w-3xl px-4 py-10 text-kca-gray-400">Loading…</div>;
   }
 
   if (rep.status === "pending" || rep.status === "processing") {
@@ -204,11 +204,11 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
       <div className="mx-auto max-w-3xl px-4 py-10 text-center">
         <div className="card">
           <h1 className="section-heading">{rep.name}</h1>
-          <p className="mt-2 text-kca-text-secondary">
+          <p className="mt-2 text-kca-gray-100">
             Building your {rep.colorToPlay} repertoire — analysing variations with the engine and writing the
             coach&apos;s guide. This runs once and is cached, so it&apos;s instant next time.
           </p>
-          <div className="mt-4 animate-pulse text-kca-accent">Working… ({rep.status})</div>
+          <div className="mt-4 animate-pulse text-kca-cyan">Working… ({rep.status})</div>
         </div>
       </div>
     );
@@ -232,11 +232,11 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link href="/dashboard/opening" className="text-sm text-kca-text-muted hover:text-kca-accent">
+          <Link href="/dashboard/opening" className="text-sm text-kca-gray-400 hover:text-kca-cyan">
             ← Opening Trainer
           </Link>
           <h1 className="section-heading">{rep.name}</h1>
-          <p className="text-sm text-kca-text-muted">
+          <p className="text-sm text-kca-gray-400">
             {rep.eco ? `${rep.eco} · ` : ""}You play {rep.colorToPlay} · {variations.length} variations
           </p>
         </div>
@@ -259,7 +259,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
         {/* Left: variation list + guide */}
         <div className="order-2 lg:order-1">
           <div className="card mb-6">
-            <h2 className="mb-3 text-lg font-semibold text-kca-text-primary">Variations</h2>
+            <h2 className="mb-3 text-lg font-semibold text-kca-white">Variations</h2>
             <ul className="space-y-1">
               {variations.map((v, i) => {
                 const isBest = rep.artifact?.bestLineIndex === i;
@@ -269,16 +269,16 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
                       type="button"
                       onClick={() => setSelected(i)}
                       className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-                        selected === i ? "bg-kca-input text-kca-text-primary" : "hover:bg-kca-surface-elevated text-kca-text-secondary"
+                        selected === i ? "bg-kca-surface-3 text-kca-white" : "hover:bg-kca-surface-2 text-kca-gray-100"
                       }`}
                     >
                       <span className="flex items-center gap-2">
                         {v.name}
-                        {isBest && <span className="rounded bg-kca-accent px-1.5 py-0.5 text-[10px] font-semibold text-black">BEST</span>}
+                        {isBest && <span className="rounded bg-kca-cyan px-1.5 py-0.5 text-[10px] font-semibold text-black">BEST</span>}
                         {v.tag === "gambit" && <span className="rounded bg-kca-warning/20 px-1.5 py-0.5 text-[10px] text-kca-warning">gambit</span>}
                         {v.tag === "trap" && <span className="rounded bg-kca-danger/20 px-1.5 py-0.5 text-[10px] text-kca-danger">trap</span>}
                       </span>
-                      <span className="ml-2 font-mono text-xs text-kca-text-muted">{v.eco}</span>
+                      <span className="ml-2 font-mono text-xs text-kca-gray-400">{v.eco}</span>
                     </button>
                   </li>
                 );
@@ -287,8 +287,8 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
           </div>
 
           <div className="card">
-            <h2 className="mb-3 text-lg font-semibold text-kca-text-primary">Coach&apos;s guide</h2>
-            <div className="space-y-3 text-sm leading-relaxed text-kca-text-secondary">
+            <h2 className="mb-3 text-lg font-semibold text-kca-white">Coach&apos;s guide</h2>
+            <div className="space-y-3 text-sm leading-relaxed text-kca-gray-100">
               {(rep.guide ?? "").split(/\n\n+/).map((p, i) => (
                 <p key={i}>{p}</p>
               ))}
@@ -307,7 +307,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
               <button type="button" className="btn-secondary flex-1" disabled={safePly === 0} onClick={() => setPly((p) => Math.max(0, p - 1))}>
                 ◀
               </button>
-              <span className="min-w-[80px] text-center text-xs text-kca-text-muted">
+              <span className="min-w-[80px] text-center text-xs text-kca-gray-400">
                 {safePly === 0 ? "start" : `move ${Math.ceil(safePly / 2)}${safePly % 2 ? " (W)" : " (B)"}`}
               </span>
               <button type="button" className="btn-secondary flex-1" disabled={safePly >= maxPly} onClick={() => setPly((p) => Math.min(maxPly, p + 1))}>
@@ -318,12 +318,12 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
               </button>
             </div>
 
-            <div className="mt-3 font-mono text-xs leading-relaxed text-kca-text-secondary">
+            <div className="mt-3 font-mono text-xs leading-relaxed text-kca-gray-100">
               {(currentLine?.moves ?? []).map((m, i) => (
                 <span
                   key={i}
-                  className={`cursor-pointer rounded px-1 ${i + 1 === safePly ? "bg-kca-accent/30 text-kca-text-primary" : ""} ${
-                    currentLine?.outOfBookAtPly !== undefined && i >= currentLine.outOfBookAtPly ? "text-kca-text-muted" : ""
+                  className={`cursor-pointer rounded px-1 ${i + 1 === safePly ? "bg-kca-cyan/30 text-kca-white" : ""} ${
+                    currentLine?.outOfBookAtPly !== undefined && i >= currentLine.outOfBookAtPly ? "text-kca-gray-400" : ""
                   }`}
                   onClick={() => setPly(i + 1)}
                 >
@@ -333,7 +333,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
               ))}
             </div>
             {currentLine?.outOfBookAtPly !== undefined && (
-              <p className="mt-2 text-[11px] italic text-kca-text-muted">
+              <p className="mt-2 text-[11px] italic text-kca-gray-400">
                 Popular human play to move {Math.ceil(currentLine.outOfBookAtPly / 2)}; the rest is the engine&apos;s
                 continuation.
               </p>
@@ -348,7 +348,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
               {explaining ? "Explaining…" : safePly < 1 ? "Step forward, then explain a move" : `Explain ${currentLine?.moves[safePly - 1] ?? ""}`}
             </button>
             {explanation && (
-              <div className="mt-3 rounded-lg border border-kca-border bg-kca-surface-elevated p-3 text-sm leading-relaxed text-kca-text-secondary">
+              <div className="mt-3 rounded-lg border border-kca-border bg-kca-surface-2 p-3 text-sm leading-relaxed text-kca-gray-100">
                 {explanation}
               </div>
             )}
