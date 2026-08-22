@@ -2,11 +2,14 @@ import { Queue, type ConnectionOptions } from "bullmq";
 import { getQueueConnection, queueEnabled } from "./connection";
 import { runReportJob, type ReportJobData } from "@/lib/reports/runReportJob";
 import { runProfileJob } from "@/lib/second/runProfileJob";
+import { runOpeningJob } from "@/lib/opening/runOpeningJob";
 import type { ProfileJobData } from "@/lib/second/types";
+import type { OpeningJobData } from "@/lib/opening/types";
 
 export const REPORT_QUEUE = "kca:reports";
 export const INVOICE_QUEUE = "kca:invoices";
 export const PROFILE_QUEUE = "kca:profiles";
+export const OPENING_QUEUE = "kca:openings";
 
 // BullMQ ships its own nested ioredis; passing our top-level ioredis instance is
 // runtime-compatible but the two package copies have distinct types, so we cast
@@ -62,4 +65,28 @@ export async function enqueueProfile(data: ProfileJobData): Promise<void> {
     return;
   }
   setImmediate(() => void runProfileJob(data));
+}
+
+let openingQueue: Queue | null = null;
+
+function getOpeningQueue(): Queue | null {
+  if (!queueEnabled()) return null;
+  if (!openingQueue) {
+    openingQueue = new Queue(OPENING_QUEUE, { connection: bullmqConnection() });
+  }
+  return openingQueue;
+}
+
+/**
+ * Enqueue an opening-repertoire generation. Same durable-with-inline-fallback
+ * contract as enqueueProfile: with QUEUE_REDIS_URL it survives restarts; without
+ * it, the job runs inline (fire-and-forget) so the feature works in dev.
+ */
+export async function enqueueOpening(data: OpeningJobData): Promise<void> {
+  const queue = getOpeningQueue();
+  if (queue) {
+    await queue.add("opening", data, { removeOnComplete: true, removeOnFail: 50 });
+    return;
+  }
+  setImmediate(() => void runOpeningJob(data));
 }
