@@ -1,9 +1,11 @@
 import { Worker, type ConnectionOptions } from "bullmq";
 import { getQueueConnection } from "./connection";
-import { REPORT_QUEUE, PROFILE_QUEUE } from "./queues";
+import { REPORT_QUEUE, PROFILE_QUEUE, OPENING_QUEUE } from "./queues";
 import { runReportJob, type ReportJobData } from "@/lib/reports/runReportJob";
 import { runProfileJob } from "@/lib/second/runProfileJob";
+import { runOpeningJob } from "@/lib/opening/runOpeningJob";
 import type { ProfileJobData } from "@/lib/second/types";
+import type { OpeningJobData } from "@/lib/opening/types";
 
 /**
  * Boot the BullMQ workers. Run from the standalone `worker.ts` entrypoint
@@ -46,6 +48,19 @@ export function startWorkers(): void {
   );
   profileWorker.on("completed", (job) => console.log(`[worker] profile job ${job.id} completed`));
 
+  const openingWorker = new Worker<OpeningJobData>(
+    OPENING_QUEUE,
+    async (job) => {
+      await runOpeningJob(job.data);
+    },
+    { connection: connection as unknown as ConnectionOptions },
+  );
+
+  openingWorker.on("failed", (job, err) =>
+    console.error(`[worker] opening job ${job?.id ?? "?"} failed:`, err.message),
+  );
+  openingWorker.on("completed", (job) => console.log(`[worker] opening job ${job.id} completed`));
+
   // Invoice worker is registered here in Track D.
-  console.log(`[worker] started — processing queues: ${REPORT_QUEUE}, ${PROFILE_QUEUE}`);
+  console.log(`[worker] started — processing queues: ${REPORT_QUEUE}, ${PROFILE_QUEUE}, ${OPENING_QUEUE}`);
 }

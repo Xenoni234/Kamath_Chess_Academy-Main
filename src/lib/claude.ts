@@ -85,6 +85,8 @@ const MOVE_EXPLANATION_SYSTEM = "You are a chess coach explaining moves to a stu
 const REPORT_SYSTEM = "You are a chess coach writing a concise performance report for a student.";
 const REPERTOIRE_SYSTEM =
   "You are a chess second preparing a player for a specific opponent. You annotate lines that have already been chosen by engine analysis — never invent moves, never contradict the supplied evaluations.";
+const OPENING_SYSTEM =
+  "You are a chess coach teaching an opening to a student. You explain the plans and ideas behind lines that have already been chosen by engine analysis — never invent moves, never contradict the supplied evaluations.";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
 /**
@@ -132,6 +134,14 @@ function repertoirePrompt(description: string) {
   return `Write an opponent-specific briefing, 5-7 short paragraphs, for a student preparing against this player. Structure it as: (1) who this opponent is and how they play, (2) the concrete weaknesses to target, (3) their tactical profile — which motifs they miss and which they land, always with the sample size, and say plainly when the evidence is thin rather than rounding it into a claim, (4) their behavioural patterns — when their accuracy drops, which position types suit them least, how their losses end — stated as observed tendencies over their games and never as claims about what they feel, (5) walk through the recommended lines below in order, explaining what each one exploits and what to expect in reply, (6) a short "what to do if they deviate" note.
 
 Every move, evaluation and percentage below came from Stockfish analysis of their real games — cite them, and do not introduce any move or claim that is not in this data. If a section is empty, say so plainly rather than inventing content. Address the student as "you" and refer to the opponent by their handle.
+
+${description}`;
+}
+
+function openingPrompt(description: string) {
+  return `Write a coaching guide to this opening, 5-7 short paragraphs, for a student learning to play it. Structure it as: (1) what this opening is about — the strategic idea and what you are trying to achieve with your colour, (2) walk through each major variation below in order, explaining the plans, typical pawn breaks and piece placements, and what to aim for in each, (3) which line is the most critical or testing and how to meet it, (4) the common mistakes to avoid and what to do if the opponent steers into a line not listed here.
+
+Every move and evaluation below came from Stockfish analysis and the opening database — cite them, and do not introduce any move or claim that is not in this data. Address the student as "you". Keep it practical and encouraging, like a lesson.
 
 ${description}`;
 }
@@ -561,5 +571,70 @@ export async function generateOpponentRepertoire(params: OpponentRepertoireParam
   } catch (error) {
     console.error("[second] repertoire generation failed, using template:", error);
     return templateRepertoireNarrative(params);
+  }
+}
+
+export type OpeningGuideParams = {
+  name: string;
+  colorToPlay: string;
+  eco: string | null;
+  variationCount: number;
+  /** Engine-best line for our colour (SAN), if one was found. */
+  bestLine: string[] | null;
+  /** Pre-rendered artifact description (see opening/describeOpening.ts). */
+  description: string;
+};
+
+/**
+ * Deterministic opening-guide prose. Every sentence restates data the engine and
+ * opening database already produced, so the free provider never invents chess.
+ */
+function templateOpeningGuide(params: OpeningGuideParams): string {
+  const { name, colorToPlay, eco, variationCount, bestLine } = params;
+
+  const p1 = `A guide to the ${name}${eco ? ` (ECO ${eco})` : ""}, from your side as ${colorToPlay}. This repertoire covers ${variationCount} of its main variations, each played out to roughly 15 moves with engine analysis.`;
+
+  const p2 = bestLine && bestLine.length
+    ? `Your strongest line here, by the engine's evaluation, is ${bestLine.join(" ")}. Learn this one first — it is the most reliable way to reach a good position.`
+    : `Work through the variations below in order; each has been checked by the engine to a playable depth.`;
+
+  const p3 = `Each variation below is a real, engine-approved line. Where a line is marked as leaving popular human play, that is the point at which you are on your own theory and should understand the ideas rather than memorise moves. If your opponent plays something not covered here, fall back on the evaluations given and the general plans of the opening.`;
+
+  return [p1, p2, p3].join("\n\n");
+}
+
+/**
+ * Author a coaching guide for an opening (Phase 5 Opening Trainer).
+ *
+ * The lines are chosen by engine analysis before this is called — the AI layer
+ * only explains them. On any provider failure the deterministic template output is
+ * returned rather than throwing, so a repertoire is always produced.
+ */
+export async function generateOpeningGuide(params: OpeningGuideParams): Promise<string> {
+  const provider = activeProvider();
+
+  if (provider === "template") return templateOpeningGuide(params);
+
+  try {
+    if (provider === "ollama") {
+      const text = await ollamaChat(OPENING_SYSTEM, openingPrompt(params.description), 1200);
+      return text || templateOpeningGuide(params);
+    }
+
+    if (provider === "openai-compatible") {
+      const text = await llmChat(OPENING_SYSTEM, openingPrompt(params.description), 1600);
+      return text || templateOpeningGuide(params);
+    }
+
+    const message = await anthropicClient().messages.create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1200,
+      system: OPENING_SYSTEM,
+      messages: [{ role: "user", content: openingPrompt(params.description) }],
+    });
+    return textFromMessage(message) || templateOpeningGuide(params);
+  } catch (error) {
+    console.error("[opening] guide generation failed, using template:", error);
+    return templateOpeningGuide(params);
   }
 }

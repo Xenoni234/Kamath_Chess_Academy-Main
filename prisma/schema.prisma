@@ -112,6 +112,7 @@ model User {
   achievements   Achievement[]
   auditLogs       AuditLog[]
   opponentProfiles OpponentProfile[]
+  savedOpenings   SavedOpening[]
 
   @@index([role])
   @@index([isActive])
@@ -549,4 +550,45 @@ model RepertoirePlan {
 
   @@index([profileId, createdAt])
   @@map("repertoire_plans")
+}
+
+/**
+ * A generated opening repertoire (Phase 5 Opening Trainer). GLOBAL and cached —
+ * a repertoire is identical for every user, so it is keyed by `slug`
+ * (normalized name + colour + version) and shared. `artifact` holds the
+ * OpeningArtifact, `linesJson` the extended RepertoireLine[], `summary` the AI
+ * coaching guide, `pdfUrl` an ephemeral /tmp path.
+ */
+model OpeningRepertoire {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  eco         String?
+  colorToPlay String   @default("white")
+  version     Int      @default(1)
+  status      String   @default("pending")
+  artifact    Json?
+  summary     String?  @db.Text
+  linesJson   Json?
+  pdfUrl      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  saved       SavedOpening[]
+
+  @@index([status, updatedAt])
+  @@map("opening_repertoires")
+}
+
+/** A user's personal shortcut to a global OpeningRepertoire. */
+model SavedOpening {
+  id           String            @id @default(cuid())
+  userId       String
+  repertoireId String
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repertoire   OpeningRepertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repertoireId])
+  @@index([userId, createdAt])
+  @@map("saved_openings")
 }
