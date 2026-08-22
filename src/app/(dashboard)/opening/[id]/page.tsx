@@ -300,20 +300,20 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
         <div className="order-1 lg:order-2">
           <div className="card">
             <ChessBoard fen={fens[safePly]} orientation={orientation} onMove={() => {}} disabled lastMove={safePly > 0 ? ucis[safePly - 1] : undefined} />
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <button type="button" className="btn-secondary flex-1" disabled={safePly === 0} onClick={() => setPly(0)}>
+            <div className="mt-3 flex items-center gap-1.5">
+              <button type="button" aria-label="Start" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly === 0} onClick={() => setPly(0)}>
                 ⏮
               </button>
-              <button type="button" className="btn-secondary flex-1" disabled={safePly === 0} onClick={() => setPly((p) => Math.max(0, p - 1))}>
+              <button type="button" aria-label="Back" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly === 0} onClick={() => setPly((p) => Math.max(0, p - 1))}>
                 ◀
               </button>
-              <span className="min-w-[80px] text-center text-xs text-kca-gray-400">
+              <span className="flex-1 whitespace-nowrap text-center text-xs text-kca-gray-400">
                 {safePly === 0 ? "start" : `move ${Math.ceil(safePly / 2)}${safePly % 2 ? " (W)" : " (B)"}`}
               </span>
-              <button type="button" className="btn-secondary flex-1" disabled={safePly >= maxPly} onClick={() => setPly((p) => Math.min(maxPly, p + 1))}>
+              <button type="button" aria-label="Forward" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly >= maxPly} onClick={() => setPly((p) => Math.min(maxPly, p + 1))}>
                 ▶
               </button>
-              <button type="button" className="btn-secondary flex-1" disabled={safePly >= maxPly} onClick={() => setPly(maxPly)}>
+              <button type="button" aria-label="End" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly >= maxPly} onClick={() => setPly(maxPly)}>
                 ⏭
               </button>
             </div>
