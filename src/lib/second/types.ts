@@ -548,4 +548,6 @@ export type ProfileJobData = {
   playerName?: string;
   /** Raw PGN the user pasted (up to 15 games). */
   pastedPgn?: string;
+  /** Forced opponent colour for pasted games whose names match neither side. */
+  forcedColor?: "w" | "b";
 };

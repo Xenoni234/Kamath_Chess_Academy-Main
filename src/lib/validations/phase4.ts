@@ -31,6 +31,19 @@ const accountSchema = z.object({
 export type AccountInput = z.infer<typeof accountSchema>;
 
 /**
+ * Preview a pasted PGN block without running a profile. Same byte cap as the
+ * create route; identity fields are optional here because the preview's whole
+ * job is to TELL the user when it cannot pick a side (so they add a name/FIDE id
+ * or force a colour).
+ */
+export const pgnPreviewSchema = z.object({
+  pastedPgn: z.string().min(1).max(300_000),
+  playerName: z.string().trim().max(80).optional(),
+  fideId: z.string().trim().max(20).regex(/^\d*$/, "A FIDE ID is digits only").optional(),
+  forcedColor: z.enum(["w", "b"]).optional(),
+});
+
+/**
  * Create an opponent-profiling run. FIDE is metadata only — games need a handle.
  *
  * Accepts both the multi-account form and the original single-handle form, and
@@ -55,6 +68,10 @@ export const createProfileSchema = z
     /** Raw PGN, up to MAX_PASTED_GAMES games. Capped in bytes here; the game
      *  count is checked in the refine below so the error is specific. */
     pastedPgn: z.string().max(300_000).optional(),
+    /** When the pasted names match neither side, the UI forces which colour the
+     *  opponent played, rather than dropping the games. Must reach the job, or a
+     *  paste that previewed as usable would be silently discarded at ingest. */
+    forcedColor: z.enum(["w", "b"]).optional(),
   })
   .superRefine((value, ctx) => {
     const accounts =
@@ -81,11 +98,11 @@ export const createProfileSchema = z
           message: `Paste at most ${MAX_PASTED_GAMES} games (found ${gameCount})`,
         });
       }
-      if (!value.playerName?.trim() && !value.fideId?.trim()) {
+      if (!value.playerName?.trim() && !value.fideId?.trim() && !value.forcedColor) {
         ctx.addIssue({
           code: "custom",
           path: ["playerName"],
-          message: "Add the opponent's name (or FIDE ID) so we know which side is theirs",
+          message: "Add the opponent's name or FIDE ID (or set which colour they played) so we know which side is theirs",
         });
       }
     }
@@ -118,6 +135,7 @@ export const createProfileSchema = z
       fideId: value.fideId,
       playerName: value.playerName,
       pastedPgn: value.pastedPgn,
+      forcedColor: value.forcedColor,
     };
   });
 

@@ -50,6 +50,19 @@ const STATUS_LABELS: Record<ProfileStatus, string> = {
   failed: "Failed",
 };
 
+type PreviewGame = {
+  index: number;
+  opponentColor: "w" | "b";
+  result: "won" | "drawn" | "lost";
+  date: string | null;
+  moveCount: number;
+  opening: string;
+  eco: string | null;
+  opponentName: string | null;
+};
+type PreviewReject = { index: number; label: string; reason: string };
+type PgnPreview = { accepted: PreviewGame[]; rejected: PreviewReject[]; total: number };
+
 export default function SecondPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -64,6 +77,13 @@ export default function SecondPage() {
   const [pastedPgn, setPastedPgn] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  /** Live paste preview: which games parse, and why the rest don't. */
+  const [pgnPreview, setPgnPreview] = useState<PgnPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  /** UI override for the opponent's colour when names match neither side. */
+  const [forcedColor, setForcedColor] = useState<"" | "w" | "b">("");
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Id of the row whose delete is armed, and the one currently deleting. */
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -156,6 +176,42 @@ export default function SecondPage() {
     );
   }, []);
 
+  // Debounced live preview of the pasted PGN — same parser the job uses, so what
+  // the user sees is exactly what will be ingested.
+  useEffect(() => {
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    const text = pastedPgn.trim();
+    if (!text) {
+      setPgnPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+    setPreviewLoading(true);
+    previewTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/second/pgn-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pastedPgn: text,
+            playerName: playerName.trim() || undefined,
+            fideId: fideId.trim() || undefined,
+            forcedColor: forcedColor || undefined,
+          }),
+        });
+        const data = await res.json();
+        setPgnPreview(data.success ? { accepted: data.accepted, rejected: data.rejected, total: data.total } : null);
+      } catch {
+        setPgnPreview(null);
+      } finally {
+        setPreviewLoading(false);
+      }
+    }, 400);
+    return () => {
+      if (previewTimer.current) clearTimeout(previewTimer.current);
+    };
+  }, [pastedPgn, playerName, fideId, forcedColor]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -177,14 +233,23 @@ export default function SecondPage() {
 
     const pasted = pastedPgn.trim();
     if (pasted) {
-      const gameCount = (pasted.match(/\[Event\b/gi) ?? []).length || 1;
-      if (gameCount > MAX_PASTED_GAMES) {
-        setFormError(`Paste at most ${MAX_PASTED_GAMES} games (found ${gameCount}).`);
+      if (!playerName.trim() && !fideId.trim() && !forcedColor) {
+        setFormError("Add the opponent's name or FIDE ID (or set which colour they played) so we know which side is theirs.");
         return;
       }
-      if (!playerName.trim() && !fideId.trim()) {
-        setFormError("Add the opponent's name (or FIDE ID) so we know which side is theirs.");
-        return;
+      // The live preview is authoritative when it has loaded; otherwise fall back
+      // to the raw [Event tally as a last-resort cap guard.
+      if (pgnPreview) {
+        if (pgnPreview.accepted.length === 0) {
+          setFormError("None of the pasted games can be used yet — check the preview below.");
+          return;
+        }
+      } else {
+        const gameCount = (pasted.match(/\[Event\b/gi) ?? []).length || 1;
+        if (gameCount > MAX_PASTED_GAMES) {
+          setFormError(`Paste at most ${MAX_PASTED_GAMES} games (found ${gameCount}).`);
+          return;
+        }
       }
     }
 
@@ -200,6 +265,7 @@ export default function SecondPage() {
           fideId: fideId.trim() || undefined,
           playerName: playerName.trim() || undefined,
           pastedPgn: pasted || undefined,
+          forcedColor: (pasted && forcedColor) || undefined,
         }),
       });
       const data = await response.json();
@@ -212,6 +278,8 @@ export default function SecondPage() {
       setFideId("");
       setPlayerName("");
       setPastedPgn("");
+      setPgnPreview(null);
+      setForcedColor("");
       await loadProfiles();
       startPolling();
     } catch {
@@ -463,6 +531,89 @@ export default function SecondPage() {
                   Paste one or more games in PGN. Each game needs a date, and the opponent&rsquo;s
                   name (above) or FIDE ID so we know which side is theirs.
                 </p>
+
+                {previewLoading && !pgnPreview && (
+                  <p className="mt-2 text-xs text-kca-gray-400">Checking games…</p>
+                )}
+
+                {pgnPreview && (
+                  <div className="mt-2 rounded-lg border border-kca-border bg-kca-surface-2 p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-kca-white">
+                        {pgnPreview.accepted.length} of {pgnPreview.total} game
+                        {pgnPreview.total === 1 ? "" : "s"} ready
+                        {pgnPreview.rejected.length > 0 && (
+                          <span className="text-kca-warning"> · {pgnPreview.rejected.length} skipped</span>
+                        )}
+                      </p>
+                      {previewLoading && <span className="text-xs text-kca-gray-500">updating…</span>}
+                    </div>
+
+                    {pgnPreview.rejected.some((r) => /which side/i.test(r.reason)) && (
+                      <div className="mt-2 rounded-md border border-kca-warning/40 bg-kca-warning/10 p-2 text-xs text-kca-gray-100">
+                        Some games don&rsquo;t name the opponent in a way we can match. If every pasted
+                        game is the same opponent, set which colour they played:
+                        <div className="mt-1.5 flex gap-1.5">
+                          {(["w", "b"] as const).map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => setForcedColor((prev) => (prev === c ? "" : c))}
+                              className={`rounded px-2 py-1 ${
+                                forcedColor === c
+                                  ? "bg-kca-cyan text-black"
+                                  : "border border-kca-border bg-kca-surface-3 text-kca-gray-100"
+                              }`}
+                            >
+                              Opponent played {c === "w" ? "White" : "Black"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {pgnPreview.accepted.length > 0 && (
+                      <ul className="mt-2 max-h-40 space-y-1 overflow-auto">
+                        {pgnPreview.accepted.map((g) => (
+                          <li key={`a-${g.index}`} className="flex items-center gap-2 text-xs text-kca-gray-100">
+                            <span
+                              className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+                                g.result === "won"
+                                  ? "bg-kca-success"
+                                  : g.result === "lost"
+                                    ? "bg-kca-danger"
+                                    : "bg-kca-gray-400"
+                              }`}
+                            />
+                            <span className="font-mono text-kca-gray-400">{g.date ?? "no date"}</span>
+                            <span>as {g.opponentColor === "w" ? "White" : "Black"}</span>
+                            <span className="text-kca-gray-500">· {g.result}</span>
+                            {g.opponentName && <span className="truncate text-kca-gray-500">vs {g.opponentName}</span>}
+                            <span className="ml-auto shrink-0 text-kca-gray-500">{g.moveCount} moves</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {pgnPreview.rejected.length > 0 && (
+                      <ul className="mt-2 space-y-1 border-t border-kca-border pt-2">
+                        {pgnPreview.rejected.map((r, i) => (
+                          <li key={`r-${i}`} className="flex gap-2 text-xs">
+                            <span className="shrink-0 text-kca-danger">skipped</span>
+                            <span className="truncate text-kca-gray-400">{r.label}</span>
+                            <span className="text-kca-gray-500">— {r.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {pastedPgn.trim() && !playerName.trim() && !fideId.trim() && !forcedColor && (
+                  <p className="mt-1.5 text-xs text-kca-warning">
+                    Add the opponent&rsquo;s name or FIDE ID above so we know which side is theirs.
+                  </p>
+                )}
               </div>
 
               <div>

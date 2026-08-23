@@ -108,7 +108,7 @@ function stageTimer() {
 }
 
 async function runProfileJobInner(data: ProfileJobData): Promise<void> {
-  const { profileId, requestedById, handle, source, colorToPlay, fideId, playerName, pastedPgn } = data;
+  const { profileId, requestedById, handle, source, colorToPlay, fideId, playerName, pastedPgn, forcedColor } = data;
   // Jobs enqueued before multi-account support carry only handle/source, and
   // those payloads are JSON sitting in Redis — a deploy landing while jobs are
   // queued must not crash the worker.
@@ -130,6 +130,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
         ? importPastedPgn(pastedPgn, {
             playerFideId: fideId || undefined,
             playerName: playerName || undefined,
+            forcedColor: forcedColor || undefined,
             max: MAX_PASTED_GAMES,
           })
         : { games: [], rejected: [] };
