@@ -437,3 +437,58 @@ export function importPastedPgn(
 
   return { games, rejected };
 }
+
+/**
+ * A compact, display-ready summary of one accepted pasted game — no move tree,
+ * just what the paste-preview UI shows in a row.
+ */
+export type PgnPreviewGame = {
+  index: number;
+  /** Which side the profiled opponent played in this game. */
+  opponentColor: "w" | "b";
+  /** The opponent's result. */
+  result: "won" | "drawn" | "lost";
+  /** ISO date (YYYY-MM-DD) from the game's end/start, or null when unknown. */
+  date: string | null;
+  /** Full moves (plies / 2, rounded up). */
+  moveCount: number;
+  opening: string;
+  eco: string | null;
+  /** The other player's name, when the PGN carried it. */
+  opponentName: string | null;
+};
+
+export type PgnPreviewResult = {
+  accepted: PgnPreviewGame[];
+  rejected: PgnRejection[];
+  total: number;
+};
+
+/**
+ * Preview a paste WITHOUT running a profile: parse it with the exact same
+ * `importPastedPgn` the job uses (so the preview can never disagree with what
+ * actually gets ingested) and return a compact per-game summary plus the
+ * rejection list. Pure and side-effect-free — safe to call on every keystroke.
+ */
+export function previewPastedPgn(
+  text: string,
+  options: { playerName?: string; playerFideId?: string; forcedColor?: "w" | "b"; max?: number },
+): PgnPreviewResult {
+  const { games, rejected } = importPastedPgn(text, options);
+  const accepted: PgnPreviewGame[] = games.map((g, i) => {
+    const ms = g.endedAtMs ?? g.startedAtMs;
+    const plies = g.san.split(/\s+/).filter(Boolean).length;
+    const result: "won" | "drawn" | "lost" = g.won ? "won" : g.drawn ? "drawn" : "lost";
+    return {
+      index: i,
+      opponentColor: g.color,
+      result,
+      date: ms ? new Date(ms).toISOString().slice(0, 10) : null,
+      moveCount: Math.ceil(plies / 2),
+      opening: g.openingName,
+      eco: g.eco,
+      opponentName: g.opponentHandle,
+    };
+  });
+  return { accepted, rejected, total: accepted.length + rejected.length };
+}
