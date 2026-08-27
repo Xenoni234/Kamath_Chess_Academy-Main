@@ -26,14 +26,13 @@ import {
   buildLineFromPgn,
   buildMoveAnalyses,
   fenAtPly,
-  sanForUci,
   summariseAccuracy,
   type MoveAnalysis,
   type PositionNode,
   type ScoredPosition,
 } from "@/lib/engine/analysis";
 import { CLASSIFICATION_META, type MoveClassification } from "@/lib/engine/classify";
-import { pvToSan, scoreFromLine } from "@/lib/engine/uci";
+import { scoreFromLine } from "@/lib/engine/uci";
 import { cn } from "@/lib/utils";
 
 /** Depth used for the sequential full-game sweep. */
@@ -385,58 +384,18 @@ export default function AnalysisBoardClient() {
   );
 
   /**
-   * Builds the payload for /api/analysis/explain. The engine's opinion is taken
-   * at the position *before* the played move, so the explanation compares what
-   * was played against what the engine wanted there.
+   * Builds the payload for /api/analysis/explain: the position *before* the
+   * played move, and the move itself. Nothing else.
+   *
+   * This deliberately sends no evaluations and no move lists. The server runs
+   * its own search and derives every figure from the position, so a mistake here
+   * cannot turn into a confidently wrong lesson — which is exactly what happened
+   * when the client owned those numbers.
    */
   const buildExplainParams = useCallback(async (): Promise<ExplainParams | null> => {
-    if (!currentNode || !isReady) return null;
-
-    // Normally the prefetch above has already searched this exact position, so
-    // the button costs no engine time at all. Falling through to a fresh search
-    // only happens when the click lands inside the prefetch delay.
-    //
-    // Either way this supersedes the live search, and it is deliberately NOT
-    // restarted here: the caller is about to stream an explanation, and with a
-    // local provider an infinite full-strength search competes for the cores
-    // generation needs. The effect above restarts it once `isExplaining` goes
-    // false.
-    const cached = explainSearchRef.current;
-    const result =
-      cached?.fen === currentNode.fenBefore
-        ? cached
-        : await analyze({
-            fen: currentNode.fenBefore,
-            depth: EXPLAIN_DEPTH,
-            multipv: MULTIPV,
-          });
-
-    if (!result.bestMove) return null;
-    explainSearchRef.current = result;
-
-    const bestScore = scoreFromLine(result.lines[0]);
-    const bestMoveSan = sanForUci(currentNode.fenBefore, result.bestMove);
-
-    return {
-      fen: currentNode.fenBefore,
-      playerMoveSan: currentNode.san,
-      bestMoveSan: bestMoveSan || currentNode.san,
-      evaluation: bestScore.cp ?? (bestScore.mate ?? 0) * 1000,
-      topMoves: result.lines.slice(0, 3).map((line) => {
-        // 10 plies rather than 6: the PV is already computed, so a longer
-        // continuation costs nothing and gives the coach more to reason from.
-        const san = pvToSan(currentNode.fenBefore, line.pv, 10);
-        return {
-          san: san[0] ?? "",
-          evaluation: line.cp ?? (line.mate ?? 0) * 1000,
-          continuation: san.slice(1).join(" "),
-        };
-      }),
-      isGoodMove: currentAnalysis
-        ? ["best", "excellent", "good"].includes(currentAnalysis.classification)
-        : result.bestMove === currentNode.uci,
-    };
-  }, [currentNode, currentAnalysis, isReady, analyze]);
+    if (!currentNode) return null;
+    return { fen: currentNode.fenBefore, playedUci: currentNode.uci };
+  }, [currentNode]);
 
   const scanPercent = scanProgress
     ? Math.round((scanProgress.done / scanProgress.total) * 100)
@@ -656,7 +615,12 @@ export default function AnalysisBoardClient() {
             key={`${currentFen}:${currentPly}`}
             buildParams={buildExplainParams}
             onStreamingChange={setIsExplaining}
-            disabled={!isReady || !currentNode || isScanning}
+            disabled={!currentNode || isScanning}
+            moveLabel={
+              currentNode
+                ? `${Math.ceil(currentNode.ply / 2)}${currentNode.mover === "w" ? "." : "..."}${currentNode.san}`
+                : undefined
+            }
           />
 
           <AnalysisMoveList

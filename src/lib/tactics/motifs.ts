@@ -69,8 +69,11 @@ export const MOTIF_LABEL: Record<Motif, string> = {
   backRankMate: "Back-rank mates",
 };
 
-/** Centipawn-ish values, only ever used for comparisons. King is effectively infinite. */
-const VALUE: Record<PieceSymbol, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 };
+/** Centipawn-ish values, only ever used for comparisons. King is effectively infinite.
+ *  Exported so the move-explanation fact builder shares ONE definition — a second
+ *  copy would silently drift from the values the detector's measured precision
+ *  was validated against. */
+export const VALUE: Record<PieceSymbol, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 };
 
 const ROOK_DIRS = [
   [0, 1],
@@ -144,7 +147,7 @@ function rayScan(
 }
 
 /** Squares of `by`-coloured pieces attacking `square`. */
-function attackersOf(chess: Chess, square: Square, by: Color): Square[] {
+export function attackersOf(chess: Chess, square: Square, by: Color): Square[] {
   try {
     return chess.attackers(square, by);
   } catch {
@@ -161,7 +164,7 @@ function attackersOf(chess: Chess, square: Square, by: Color): Square[] {
  * say whether the simpler rule is good enough, and the number it reports is
  * honest either way.
  */
-function isHanging(chess: Chess, square: Square, owner: Color): boolean {
+export function isHanging(chess: Chess, square: Square, owner: Color): boolean {
   const attacked = attackersOf(chess, square, opposite(owner)).length > 0;
   if (!attacked) return false;
   return attackersOf(chess, square, owner).length === 0;
@@ -172,7 +175,7 @@ function isHanging(chess: Chess, square: Square, owner: Color): boolean {
  * ray from an enemy slider? Relative pins can be broken; absolute ones cannot,
  * and only the latter genuinely immobilise the piece.
  */
-function isPinnedAbsolutely(chess: Chess, square: Square, owner: Color): boolean {
+export function isPinnedAbsolutely(chess: Chess, square: Square, owner: Color): boolean {
   const piece = chess.get(square);
   if (!piece || piece.color !== owner || piece.type === "k") return false;
 

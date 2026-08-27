@@ -23,6 +23,14 @@ export type MultiPvMove = {
   cp: number | null;
   /** Moves to mate, White's point of view. */
   mate: number | null;
+  /**
+   * The whole principal variation in UCI, first entry equal to `uci`.
+   *
+   * Kept because a bare best move cannot be explained: "why is this good" is
+   * answered by what follows it. The search already computes the line, so
+   * keeping it is free — it used to be discarded at the point of parsing.
+   */
+  pv: string[];
 };
 
 const ENGINE_DIR = path.join(process.cwd(), "public", "engine");
@@ -477,7 +485,7 @@ function searchPositionMultiPV(
     engine.listener = (line: string) => {
       const info = parseInfoLine(line, fen);
       if (info && info.pv.length > 0 && info.multipv <= multiPv) {
-        lines.set(info.multipv, { uci: info.pv[0], cp: info.cp, mate: info.mate });
+        lines.set(info.multipv, { uci: info.pv[0], cp: info.cp, mate: info.mate, pv: info.pv });
         return;
       }
       if (parseBestMove(line)) finish();

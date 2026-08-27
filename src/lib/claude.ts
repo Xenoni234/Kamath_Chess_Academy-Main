@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { pristineFetch } from "@/lib/pristineFetch";
+import type { MoveFacts } from "@/lib/analysis/moveFacts";
 
 /**
  * AI narration for move explanations and report narratives.
@@ -37,14 +38,15 @@ function activeProvider(): AiProvider {
   return "template";
 }
 
-export type ChessMoveExplanationParams = {
-  fen: string;
-  playerMoveSan: string;
-  bestMoveSan: string;
-  evaluation: number;
-  topMoves: Array<{ san: string; evaluation: number; continuation: string }>;
-  isGoodMove: boolean;
-};
+/**
+ * Move explanations are built from VERIFIED facts, never from a raw position.
+ *
+ * This used to be a FEN plus a few numbers, and the model was asked to work out
+ * the tactics itself — which it cannot do reliably from a FEN string, so it
+ * invented them. `MoveFacts` (lib/analysis/moveFacts.ts) is computed by chess.js
+ * and the validated motif detector before we ever call a model.
+ */
+export type ChessMoveExplanationParams = MoveFacts;
 
 export type GameReportStats = {
   username: string;
@@ -81,7 +83,13 @@ export function isClaudeConfigured(): boolean {
 // Prompts (shared by the Anthropic and Ollama providers)
 // ---------------------------------------------------------------------------
 
-const MOVE_EXPLANATION_SYSTEM = "You are a chess coach explaining moves to a student.";
+/**
+ * The anti-invention clause is the whole point. Every other prompt here already
+ * carries one; this one did not, and the result was a coach that confidently
+ * described forks and pins that were not on the board.
+ */
+const MOVE_EXPLANATION_SYSTEM =
+  "You are a chess coach explaining a move to a student. The position and the move have already been analysed by a chess engine and by a position checker — every fact you need is given to you. Never invent a move, never name a move that is not in the supplied list, never contradict the supplied evaluations, and never claim a tactic that is not listed, and never state that a piece stands on a square unless the supplied piece list puts it there. If the facts do not explain why a move is good, say plainly what the move does and what the evaluation shows instead of speculating.";
 const REPORT_SYSTEM = "You are a chess coach writing a concise performance report for a student.";
 const REPERTOIRE_SYSTEM =
   "You are a chess second preparing a player for a specific opponent. You annotate lines that have already been chosen by engine analysis — never invent moves, never contradict the supplied evaluations.";
@@ -95,21 +103,101 @@ const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
  * words in about the time Ollama takes for 40, and the extra room buys a
  * genuinely better explanation rather than a padded one.
  */
-function moveExplanationPrompt(params: ChessMoveExplanationParams, words: number) {
-  const alternatives = params.topMoves
-    .slice(0, 3)
-    .map((move, index) => `${index + 1}. ${move.san} (${move.evaluation}): ${move.continuation}`)
-    .join("\n");
+/** Readable phrase for a detected motif. */
+const MOTIF_PHRASE: Record<string, string> = {
+  fork: "a fork",
+  skewer: "a skewer",
+  discoveredAttack: "a discovered attack",
+  hangingPiece: "the win of an undefended piece",
+  backRankMate: "a back-rank mate",
+  pin: "a pin",
+};
 
-  return `Given this position and move choice, explain in no more than ${words} words why ${params.bestMoveSan} is correct. Mention the relevant tactics or plans, and address the student as "you".
+/** One move rendered as plain facts — what it literally does on the board. */
+function describeForPrompt(m: MoveFacts["played"]): string {
+  const bits = [`${m.piece} ${m.from}-${m.to}`];
+  if (m.isCapture) bits.push(`captures a ${m.captured ?? "piece"}`);
+  if (m.isPromotion) bits.push("promotes");
+  if (m.isCastle) bits.push("castles");
+  if (m.isMate) bits.push("is checkmate");
+  else if (m.isCheck) bits.push("gives check");
+  const tactics = m.motifs.length
+    ? `creates ${m.motifs.map((x) => MOTIF_PHRASE[x] ?? x).join(" and ")}`
+    : "creates no tactic";
+  return `${bits.join(", ")}; ${tactics}`;
+}
 
-FEN: ${params.fen}
-Your move: ${params.playerMoveSan}
-Best move: ${params.bestMoveSan}
-Evaluation: ${params.evaluation}
-Was your move good: ${params.isGoodMove ? "yes" : "no"}
-Top alternatives:
-${alternatives}`;
+/**
+ * Build the prompt from verified facts.
+ *
+ * The FEN appears only as a trailing reference — the model is told not to
+ * analyse it, because every conclusion it needs is already stated above. This is
+ * the difference between a coach that reports analysis and one that guesses.
+ */
+function moveExplanationPrompt(f: MoveFacts, words: number) {
+  const L: string[] = [];
+
+  L.push(`POSITION`);
+  L.push(`- You are playing ${f.student}. Move ${f.moveNumber}, ${f.phase}.`);
+  L.push(`- White pieces: ${f.pieces.white}`);
+  L.push(`- Black pieces: ${f.pieces.black}`);
+  L.push(`- Material: ${f.material}.`);
+  if (f.inCheckBefore) L.push(`- You were in check.`);
+  if (f.forced) L.push(`- This was the ONLY legal move — it was forced.`);
+
+  L.push(``, `THE MOVE YOU PLAYED: ${f.played.san}`);
+  L.push(`- ${describeForPrompt(f.played)}.`);
+  L.push(
+    `- The square ${f.target.square} is hit by your ${f.target.yours || "(nothing)"} and defended by their ${f.target.theirs || "(nothing)"}. This is the COMPLETE list — do not claim any other piece attacks or defends it.`,
+  );
+  if (f.evalBefore) L.push(`- Evaluation before it (your side): ${f.evalBefore}.`);
+  if (f.evalAfter) L.push(`- Evaluation after it (your side): ${f.evalAfter}.`);
+  if (f.classificationLabel) {
+    L.push(`- Engine verdict: ${f.classificationLabel}${f.symbol ? ` (${f.symbol})` : ""}${f.cpLoss ? `, giving up ${f.cpLoss} centipawns` : ""}.`);
+  }
+
+  if (f.playedWasBest) {
+    L.push(``, `This WAS the engine's first choice — tell them why it is right.`);
+  } else if (f.best) {
+    L.push(``, `THE ENGINE PREFERRED: ${f.best.san}`);
+    L.push(`- ${describeForPrompt(f.best)}.`);
+    if (f.best.line) L.push(`- Its line: ${f.best.line}`);
+  }
+
+  if (f.missedMotifs.length) {
+    L.push(
+      ``,
+      `WHAT YOU MISSED: ${f.missedMotifs
+        .map((x) => `${MOTIF_PHRASE[x.motif] ?? x.motif} (detector accuracy ${Math.round(x.precision * 100)}%)`)
+        .join(", ")}.`,
+    );
+  }
+  if (f.refutation) L.push(``, `HOW YOUR MOVE IS ANSWERED: ${f.refutation}`);
+  if (f.hangingAfter.length) {
+    L.push(``, `LEFT UNDEFENDED AFTER YOUR MOVE: ${f.hangingAfter.join(", ")}.`);
+  }
+
+  if (f.alternatives.length) {
+    L.push(``, `ENGINE OPTIONS HERE:`);
+    f.alternatives.forEach((a, i) => L.push(`${i + 1}. ${a.san} (${a.eval})${a.line ? `: ${a.line}` : ""}`));
+  }
+
+  if (!f.best && !f.evalBefore) {
+    L.push(``, `NOTE: no engine analysis was available for this position. Describe only what the move does; do not judge whether it is good.`);
+  }
+
+  L.push(
+    ``,
+    `MOVES YOU MAY NAME: ${f.allowedMoves.join(", ")}`,
+    `Do not name any move outside that list. Do not describe any tactic not stated above.`,
+    `The piece lists above are COMPLETE. Never mention a piece or a square that does not appear in them — if a square is not listed, it is empty.`,
+    ``,
+    `Write the explanation in no more than ${words} words, addressing the student as "you". Explain the idea behind the move and what to take away — do not simply restate the numbers.`,
+    ``,
+    `(Reference only, already analysed for you — do not re-analyse: ${f.fen})`,
+  );
+
+  return L.join("\n");
 }
 
 function reportPrompt(stats: GameReportStats) {
@@ -379,23 +467,59 @@ async function* ollamaChatStream(system: string, prompt: string, maxTokens: numb
 // Provider: template (deterministic, offline, chess-safe)
 // ---------------------------------------------------------------------------
 
-function formatEval(value: number): string {
-  if (!Number.isFinite(value)) return "unclear";
-  return value > 0 ? `+${value}` : `${value}`;
-}
+/**
+ * Deterministic move explanation. Restates verified facts only — it is the
+ * no-AI-key path, and it must never be less trustworthy than the AI one.
+ *
+ * (The previous version printed centipawns as pawns, so a +0.35 edge was shown
+ * to students as "+35".)
+ */
+function templateMoveExplanation(f: ChessMoveExplanationParams): string {
+  const parts: string[] = [];
 
-function templateMoveExplanation(params: ChessMoveExplanationParams): string {
-  const evalStr = formatEval(params.evaluation);
-  if (params.isGoodMove) {
-    return `${params.playerMoveSan} is a sound choice — the position stays in good shape (evaluation ${evalStr}). The engine's top pick here was ${params.bestMoveSan}.`;
+  const did: string[] = [];
+  if (f.played.isCapture) did.push(`takes a ${f.played.captured ?? "piece"}`);
+  if (f.played.isMate) did.push("delivers checkmate");
+  else if (f.played.isCheck) did.push("gives check");
+  if (f.played.isCastle) did.push("castles");
+  if (f.played.isPromotion) did.push("promotes");
+  const action = did.length ? ` — it ${did.join(" and ")}` : "";
+  parts.push(`${f.played.san} moves your ${f.played.piece} from ${f.played.from} to ${f.played.to}${action}.`);
+
+  if (f.forced) parts.push("It was the only legal move in the position.");
+
+  if (f.played.motifs.length) {
+    parts.push(`It creates ${f.played.motifs.map((m) => MOTIF_PHRASE[m] ?? m).join(" and ")}.`);
   }
-  const alternatives = params.topMoves
-    .slice(0, 2)
-    .map((move) => move.san)
-    .filter(Boolean)
-    .join(" or ");
-  const also = alternatives ? `, with ${alternatives} also worth a look` : "";
-  return `${params.playerMoveSan} isn't the strongest here — the engine prefers ${params.bestMoveSan} (evaluation ${evalStr})${also}. Try to spot that idea in similar positions.`;
+
+  if (f.classificationLabel && f.evalAfter) {
+    parts.push(
+      `The engine rates it ${f.classificationLabel.toLowerCase()}${f.symbol ? ` (${f.symbol})` : ""}, with the position at ${f.evalAfter} from your side${f.cpLoss ? ` — ${f.cpLoss} centipawns worse than the best move` : ""}.`,
+    );
+  } else if (f.evalAfter) {
+    parts.push(`The position stands at ${f.evalAfter} from your side afterwards.`);
+  }
+
+  if (f.playedWasBest) {
+    parts.push("This was the engine's first choice here.");
+  } else if (f.best) {
+    parts.push(
+      `The engine preferred ${f.best.san}${f.best.line ? ` (${f.best.line})` : ""}.` +
+        (f.missedMotifs.length
+          ? ` That move sets up ${f.missedMotifs.map((x) => MOTIF_PHRASE[x.motif] ?? x.motif).join(" and ")}.`
+          : ""),
+    );
+  }
+
+  if (f.refutation) parts.push(`The critical reply is ${f.refutation}.`);
+  if (f.hangingAfter.length) {
+    parts.push(`Watch out: after this move your ${f.hangingAfter.join(" and your ")} ${f.hangingAfter.length > 1 ? "are" : "is"} undefended.`);
+  }
+  if (!f.best && !f.evalBefore) {
+    parts.push("No engine analysis was available for this position, so this describes the move rather than judging it.");
+  }
+
+  return parts.join(" ");
 }
 
 function templateReportNarrative(stats: GameReportStats): string {
