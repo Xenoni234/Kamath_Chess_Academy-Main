@@ -69,11 +69,18 @@ export default function ClassesPage() {
                 </div>
                 {c.description && <div className="text-sm text-kca-gray-100 mt-2">{c.description}</div>}
               </div>
-              {c.meetingUrl && (
-                <a href={c.meetingUrl} target="_blank" rel="noopener noreferrer" className="btn-primary py-2 px-4 text-sm shrink-0">
-                  <Video className="w-4 h-4" /> Join
+              <div className="flex items-center gap-2 shrink-0">
+                {c.meetingUrl && (
+                  <a href={c.meetingUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary py-2 px-4 text-sm">
+                    <Video className="w-4 h-4" /> Meeting ↗
+                  </a>
+                )}
+                {/* Plain <a> (full navigation) so the room document loads without
+                    COEP isolation and can embed the video iframe. */}
+                <a href={`/dashboard/classes/${c.id}/room`} className="btn-primary py-2 px-4 text-sm">
+                  Enter room
                 </a>
-              )}
+              </div>
             </div>
           ))}
         </div>

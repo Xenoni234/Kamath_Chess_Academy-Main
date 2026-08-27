@@ -113,6 +113,7 @@ model User {
   auditLogs       AuditLog[]
   opponentProfiles OpponentProfile[]
   savedOpenings   SavedOpening[]
+  classMessages   Message[]
 
   @@index([role])
   @@index([isActive])
@@ -372,6 +373,9 @@ model Class {
   batch       Batch?            @relation(fields: [batchId], references: [id], onDelete: SetNull)
   coach       CoachProfile?     @relation(fields: [coachId], references: [id], onDelete: SetNull)
   enrollments ClassEnrollment[]
+  messages    Message[]
+  /** When the coach opened the live room (Phase 6 v1). Null = never gone live. */
+  liveStartedAt DateTime?
 
   @@index([status, startsAt])
   @@index([batchId])
@@ -390,6 +394,21 @@ model ClassEnrollment {
   @@index([userId])
   @@index([classId])
   @@index([batchId])
+}
+
+/** In-class chat message (Phase 6 v1). Sent over Socket.io in the `class:<id>`
+ *  room and persisted so late joiners and a post-class review see the history. */
+model Message {
+  id        String   @id @default(cuid())
+  classId   String
+  userId    String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([classId, createdAt])
+  @@map("class_messages")
 }
 
 model Payment {
