@@ -1,7 +1,6 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chess } from "chess.js";
 import ChessBoard from "@/components/chess/ChessBoard";
@@ -59,7 +58,6 @@ function replay(moves: string[]): { fens: string[]; ucis: string[] } {
 
 export default function OpeningDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
   const [rep, setRep] = useState<Repertoire | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
@@ -109,11 +107,14 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
   const safePly = Math.min(ply, maxPly);
   const orientation = rep?.colorToPlay ?? "white";
 
-  // Reset the board when the selected variation changes.
-  useEffect(() => {
+  /** Switch variation, rewinding the board and dropping the old explanation.
+   *  Done here rather than in an effect on `selected` — resetting state from an
+   *  effect triggers a second render pass for every click. */
+  function selectVariation(index: number) {
+    setSelected(index);
     setPly(0);
     setExplanation("");
-  }, [selected]);
+  }
 
   async function explainCurrent() {
     if (safePly < 1 || !currentLine) return;
@@ -123,13 +124,14 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
       const res = await fetch("/api/analysis/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Position before the move, plus the move. The server searches it and
+        // derives the evaluation, the alternatives and the tactics itself.
+        // (This used to send the played move as its own "best move", the
+        // evaluation from the END of the whole variation, and an empty
+        // alternatives list — so every specific claim was invented.)
         body: JSON.stringify({
           fen: fens[safePly - 1],
-          playerMoveSan: currentLine.moves[safePly - 1],
-          bestMoveSan: currentLine.moves[safePly - 1],
-          evaluation: currentLine.evalCp ?? 0,
-          topMoves: [],
-          isGoodMove: true,
+          playedUci: ucis[safePly - 1],
         }),
       });
       if (!res.ok || !res.body) {
@@ -267,7 +269,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
                   <li key={`${v.eco}-${v.name}-${i}`}>
                     <button
                       type="button"
-                      onClick={() => setSelected(i)}
+                      onClick={() => selectVariation(i)}
                       className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
                         selected === i ? "bg-kca-surface-3 text-kca-white" : "hover:bg-kca-surface-2 text-kca-gray-100"
                       }`}

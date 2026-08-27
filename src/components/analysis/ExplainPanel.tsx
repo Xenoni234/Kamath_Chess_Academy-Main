@@ -23,6 +23,12 @@ type ExplainPanelProps = {
    */
   onStreamingChange?: (streaming: boolean) => void;
   disabled?: boolean;
+  /**
+   * The move being explained, e.g. "12...Nf6". Shown in the header because the
+   * board displays the position *after* the move while the explanation is about
+   * the position before it — without naming the move, the two read as a mismatch.
+   */
+  moveLabel?: string;
 };
 
 // The caller passes a `key` derived from the position, so moving to a different
@@ -32,6 +38,7 @@ export default function ExplainPanel({
   buildParams,
   onStreamingChange,
   disabled,
+  moveLabel,
 }: ExplainPanelProps) {
   const [text, setText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -50,10 +57,9 @@ export default function ExplainPanel({
     setIsStreaming(true);
 
     try {
-      // `buildParams` runs its OWN engine search, so the board's live search must
-      // still be untouched here. Announcing the pause first made the board post
-      // `stop` into the very engine this is waiting on — the search then never
-      // reported `bestmove` and the panel hung until the 30s timeout.
+      // `buildParams` is now just the position and the move — the SERVER runs the
+      // search and derives every figure, so nothing here competes with the
+      // board's engine.
       const params = await buildParams();
       if (!params) {
         setError("Play or select a move first, then ask for an explanation.");
@@ -119,6 +125,11 @@ export default function ExplainPanel({
           <span className="text-[11px] uppercase tracking-wider text-kca-gray-400">
             Coach explanation
           </span>
+          {moveLabel && (
+            <span className="rounded bg-kca-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-kca-white">
+              {moveLabel}
+            </span>
+          )}
         </div>
         <button
           type="button"

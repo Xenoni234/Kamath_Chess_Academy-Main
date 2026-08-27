@@ -288,6 +288,25 @@ Phase 2 is feature-complete. **Done and verified this phase:**
 
 **Known gaps / follow-ups:**
 
+- **Move explanations are built from facts, never from a FEN. Do not "optimise"
+  this back.** `/api/analysis/explain` takes only `{ fen, playedUci }`; the SERVER
+  validates the move is legal, runs two short searches (top-3 with PVs at the
+  position, plus the position the move reached — that second score is what makes
+  "this cost you N centipawns" honest), and calls `buildMoveFacts`
+  (`src/lib/analysis/moveFacts.ts`). Only that fact record reaches the model.
+  It was previously the client's job to send the evaluation, the "best" move and
+  the alternatives, and every one of those could be — and was — wrong: the
+  Opening Trainer sent the eval from the *end of a 15-move line* as if it were
+  this position's, named the played move as its own best move, and sent an empty
+  alternatives list, so every specific claim in the output was invented. The
+  facts include the **complete piece list** and the **complete attacker/defender
+  census of the destination square**, because with either missing the model
+  invents them (it claimed a knight on an empty square, and a defender that did
+  not defend). `MOVE_EXPLANATION_SYSTEM` carries the same anti-invention clause
+  as the other prompts — it is the one that was missing it. Evaluations are
+  rendered in **pawns from the student's colour**, never raw White-POV
+  centipawns, and a mate-derived `cpLoss` (~10 000) is withheld rather than shown.
+  `scripts/verifyMoveFacts.ts` pins all of this offline.
 - **Two engine landmines in `src/lib/engine/serverEngine.ts`. Do not undo either.**
   1. **Never resolve a search without waiting for `bestmove`.** On timeout the
      code sends `stop` and then keeps its listener until the `bestmove` that

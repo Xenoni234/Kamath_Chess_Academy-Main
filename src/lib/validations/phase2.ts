@@ -1,18 +1,23 @@
 import { z } from "zod";
 
+/**
+ * Explain one move.
+ *
+ * The client sends only the position and the move — deliberately NO evaluations
+ * and no move lists. It used to send those, and a caller that computed them
+ * wrongly (an eval belonging to a different position, an empty alternatives
+ * list, "best move" set to the played move) produced confident, wrong coaching
+ * with nothing able to detect it. The server now derives every number from the
+ * position itself, so a client cannot mis-state the analysis.
+ */
 export const explainMoveSchema = z.object({
-  fen: z.string().min(10),
-  playerMoveSan: z.string(),
-  bestMoveSan: z.string(),
-  evaluation: z.number(),
-  topMoves: z.array(
-    z.object({
-      san: z.string(),
-      evaluation: z.number(),
-      continuation: z.string(),
-    })
-  ),
-  isGoodMove: z.boolean(),
+  /** Position the move is played FROM. Legality is checked in the route. */
+  fen: z.string().min(10).max(120),
+  /** The move to explain, UCI (e2e4, e7e8q). */
+  playedUci: z
+    .string()
+    .trim()
+    .regex(/^[a-h][1-8][a-h][1-8][qrbn]?$/i, "Expected a UCI move like e2e4"),
 });
 
 const LICHESS_SPEEDS = ["ultraBullet", "bullet", "blitz", "rapid", "classical", "correspondence"] as const;
