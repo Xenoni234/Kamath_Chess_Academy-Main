@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket/client";
+import { useMediaRoom, type RemoteStream } from "@/lib/media/roomClient";
 
 type ChatMessage = { id: string; userId: string; username: string; body: string; createdAt: string };
 type RosterEntry = { userId: string; username: string };
@@ -22,6 +23,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   const { id } = use(params);
   const [room, setRoom] = useState<Room | null>(null);
   const [isCoach, setIsCoach] = useState(false);
+  const [sfuEnabled, setSfuEnabled] = useState(false);
   const [viewerName, setViewerName] = useState("student");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
@@ -39,6 +41,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
     }
     setRoom(data.room);
     setIsCoach(data.isCoach);
+    setSfuEnabled(Boolean(data.sfuEnabled));
     setViewerName(data.viewerName ?? "student");
     setMessages(data.messages ?? []);
   }, [id]);
@@ -142,7 +145,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-        {/* Video */}
+        {/* Video: external link → SFU (mediasoup) → embedded Jitsi fallback. */}
         <div className="card overflow-hidden p-0">
           {room.meetingUrl ? (
             <div className="flex min-h-[24rem] flex-col items-center justify-center gap-3 p-8 text-center">
@@ -151,6 +154,8 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
                 Open meeting ↗
               </a>
             </div>
+          ) : sfuEnabled ? (
+            <SfuStage classId={room.id} />
           ) : (
             <div className="flex flex-col">
               <iframe
@@ -219,6 +224,103 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** A <video> that binds a MediaStream via ref (srcObject isn't a real attribute). */
+function MediaVideo({ stream, muted, className }: { stream: MediaStream; muted?: boolean; className?: string }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream;
+  }, [stream]);
+  return <video ref={ref} autoPlay playsInline muted={muted} className={className} />;
+}
+
+function MediaAudio({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream;
+  }, [stream]);
+  return <audio ref={ref} autoPlay />;
+}
+
+/** The mediasoup SFU stage: local self-view, remote camera grid, screen share,
+ *  and mic/cam/share controls. Rendered only when the SFU is enabled. */
+function SfuStage({ classId }: { classId: string }) {
+  const { status, localStream, screenStream, remotes, micOn, camOn, toggleMic, toggleCam, shareScreen, stopScreen } =
+    useMediaRoom(classId, true);
+
+  const cameras = remotes.filter((r: RemoteStream) => r.kind === "video" && !r.screen);
+  const screens = remotes.filter((r: RemoteStream) => r.screen);
+  const audios = remotes.filter((r: RemoteStream) => r.kind === "audio");
+
+  return (
+    <div className="flex min-h-[24rem] flex-col">
+      {status === "connecting" && (
+        <div className="p-4 text-sm text-kca-gray-400">Connecting… please allow camera &amp; microphone.</div>
+      )}
+      {status === "error" && (
+        <div className="p-4 text-sm text-kca-danger">
+          Couldn&rsquo;t start video — check camera/mic permissions. You can still use the chat.
+        </div>
+      )}
+
+      {(screens.length > 0 || screenStream) && (
+        <div className="bg-black">
+          {screenStream && <MediaVideo stream={screenStream} muted className="max-h-[50vh] w-full object-contain" />}
+          {screens.map((s) => (
+            <MediaVideo key={s.producerId} stream={s.stream} className="max-h-[50vh] w-full object-contain" />
+          ))}
+        </div>
+      )}
+
+      <div className="grid flex-1 grid-cols-2 gap-1 p-1 sm:grid-cols-3">
+        {localStream && (
+          <div className="relative">
+            <MediaVideo stream={localStream} muted className="aspect-video w-full rounded bg-black object-cover" />
+            <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 text-xs text-white">
+              You{!camOn ? " · cam off" : ""}
+            </span>
+          </div>
+        )}
+        {cameras.map((r) => (
+          <div key={r.producerId} className="relative">
+            <MediaVideo stream={r.stream} className="aspect-video w-full rounded bg-black object-cover" />
+            <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 text-xs text-white">{r.username}</span>
+          </div>
+        ))}
+      </div>
+
+      {audios.map((r) => (
+        <MediaAudio key={r.producerId} stream={r.stream} />
+      ))}
+
+      <div className="flex items-center justify-center gap-2 border-t border-kca-border p-2">
+        <button
+          type="button"
+          onClick={toggleMic}
+          className={`rounded px-3 py-1.5 text-sm ${micOn ? "bg-kca-surface-3 text-kca-white" : "bg-kca-danger text-white"}`}
+        >
+          {micOn ? "Mute" : "Unmute"}
+        </button>
+        <button
+          type="button"
+          onClick={toggleCam}
+          className={`rounded px-3 py-1.5 text-sm ${camOn ? "bg-kca-surface-3 text-kca-white" : "bg-kca-danger text-white"}`}
+        >
+          {camOn ? "Camera off" : "Camera on"}
+        </button>
+        {screenStream ? (
+          <button type="button" onClick={stopScreen} className="rounded bg-kca-danger px-3 py-1.5 text-sm text-white">
+            Stop sharing
+          </button>
+        ) : (
+          <button type="button" onClick={shareScreen} className="rounded bg-kca-cyan px-3 py-1.5 text-sm text-black">
+            Share screen
+          </button>
+        )}
       </div>
     </div>
   );

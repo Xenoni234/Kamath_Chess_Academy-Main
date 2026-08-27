@@ -1,6 +1,10 @@
 # Phase 6 — Video Classes: plan & launch recommendation
 
-**Status:** planning (not yet built). Written while the Phase 5 DB migration is pending.
+**Status:** BUILT. v1 (chat + roster + embedded video) and v2 (mediasoup SFU) are both
+implemented. The SFU is **opt-in** (`MEDIASOUP_ENABLED`) and the room falls back to embedded
+Jitsi / `meetingUrl` when it's off — so classes work in any deploy. Server signalling verified
+end-to-end (worker/router/transport/ICE); two-camera media flow needs real browsers to test.
+See §"Deployed state" at the bottom and `DEPLOYMENT.md §8.5`.
 
 **Goal (roadmap):** inbuilt group video for live classes via a **mediasoup WebRTC SFU** (no
 third-party API), Socket.io signalling, screen sharing for board demonstration, and in-class chat.
@@ -165,3 +169,37 @@ demo), render a video grid of consumers. Screen share is just another producer w
 2. On approval, I build **v1** (Message model + `classHandlers` chat + room page + Jitsi/`meetingUrl`
    video + COEP exception) — small enough to land well before 14 Sept.
 3. Schedule **v2 (mediasoup SFU)** as the first post-launch project, using this plan.
+
+---
+
+## Deployed state (what was built)
+
+**v1 — launch classroom (works with zero media infra):**
+- `Message` model + `Class.liveStartedAt` (`prisma/schema.prisma`, pushed to DB).
+- `src/lib/socket/handlers/classHandlers.ts` — `class:join/leave/message` + roster, access-gated
+  (coach or enrolled). Wired in `src/lib/socket/server.ts`.
+- `src/app/api/classes/[id]/room/route.ts` — room context/history (GET) + coach start/end + notify (POST).
+- `src/app/(dashboard)/dashboard/classes/[id]/room/page.tsx` — room page: video pane + chat + roster
+  + coach controls. Reachable via a full-navigation "Enter room" link on the classes list.
+- `server.mjs` — COEP exception for the room route so the embedded (cross-origin) video iframe loads.
+
+**v2 — mediasoup SFU (opt-in via `MEDIASOUP_ENABLED`):**
+- `src/lib/media/mediasoup.ts` — worker pool (1 per core, capped), per-room routers, transports,
+  codec config, `mediaEnabled()` gate (dev-on, prod needs the env).
+- `src/lib/socket/handlers/mediaHandlers.ts` — full signalling: capabilities, create/connect
+  transport, produce, consume, resume, producer listing, screen-share close, per-peer teardown.
+  Wired in `server.ts`.
+- `src/lib/media/roomClient.ts` — `useMediaRoom` hook: Device load, send/recv transports, publish
+  camera+mic, consume peers, screen share, mic/cam toggles, cleanup.
+- Room page renders the SFU grid (`SfuStage`) when enabled, else the v1 fallback.
+- `.env.example` + `DEPLOYMENT.md §8.5` — SFU env, UDP port range, coturn/TURN guidance.
+
+**Verified:** `tsc` clean · `npm run build` clean · mediasoup worker/router/transport boot · live
+socket signalling (auth → access → capabilities → transport ICE → producers) via a scripted client.
+**Not machine-testable here:** two real browsers exchanging camera/screen video — test that on
+localhost (two tabs) or after deploying with a public `MEDIASOUP_ANNOUNCED_IP` + TURN.
+
+## Still ahead for v2 hardening (post-launch)
+- **coturn/TURN** wired into client ICE servers (NAT traversal for all users).
+- Reconnection on transport failure; per-room participant caps; simulcast/bandwidth tuning.
+- The Socket.io **Redis adapter** before running more than one app instance.
