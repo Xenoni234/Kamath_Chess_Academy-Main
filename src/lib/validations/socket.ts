@@ -20,3 +20,12 @@ export const challengeIdSchema = z.object({ challengeId: z.string() });
 export const quickPairSchema = z.object({ timeControl: z.string() });
 
 export const tournamentWatchSchema = z.object({ tournamentId: z.string() });
+
+/** Join/leave a live class room (Phase 6 v1). */
+export const classJoinSchema = z.object({ classId: z.string().min(1) });
+
+/** An in-class chat message. */
+export const classMessageSchema = z.object({
+  classId: z.string().min(1),
+  body: z.string().trim().min(1).max(2000),
+});
