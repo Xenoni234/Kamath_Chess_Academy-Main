@@ -19,7 +19,7 @@ function room(classId: string) {
 }
 
 /** Is this user the class's coach, or enrolled in the class/its batch? */
-async function canAccess(classId: string, userId: string): Promise<boolean> {
+export async function canAccess(classId: string, userId: string): Promise<boolean> {
   const cls = await db.class.findUnique({
     where: { id: classId },
     select: { batchId: true, coach: { select: { userId: true } } },

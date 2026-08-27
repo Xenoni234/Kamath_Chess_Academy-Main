@@ -6,6 +6,7 @@ import { setupLobbyHandlers } from "./handlers/lobbyHandlers.ts";
 import { setupPresenceHandlers } from "./handlers/presenceHandlers.ts";
 import { setupTournamentHandlers } from "./handlers/tournamentHandlers.ts";
 import { setupClassHandlers } from "./handlers/classHandlers.ts";
+import { setupMediaHandlers } from "./handlers/mediaHandlers.ts";
 
 export type ConnectedUsers = Map<string, string>;
 
@@ -67,6 +68,7 @@ export function setupSocketServer(io: Server) {
     setupGameHandlers(io, socket);
     setupTournamentHandlers(io, socket);
     setupClassHandlers(io, socket);
+    setupMediaHandlers(io, socket);
 
     socket.on("disconnect", () => {
       connectedUsers.delete(socket.id);

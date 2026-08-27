@@ -293,6 +293,48 @@ Copy `.env.example` → `.env.production` and fill it in. **Required** to boot a
 
 ---
 
+## 8.5 Video classes (Phase 6)
+
+Classes have a live room with **in-class chat + roster over Socket.io** and video. Video has
+two modes; pick per your appetite for infra:
+
+**Simplest (recommended for launch): embedded video, no extra infra.**
+Leave `MEDIASOUP_ENABLED` unset in production. The room embeds a free **Jitsi Meet** call (or the
+coach's `meetingUrl` if set). Nothing to run. The room route is already served **without COEP**
+(handled in `server.mjs`) so the video iframe loads.
+
+**Full self-hosted SFU (mediasoup, Phase 6 v2): more control, real infra.**
+The SFU is built and ships in the app (`src/lib/media/`, `handlers/mediaHandlers.ts`). To turn it on:
+
+1. **Env** (`.env.production`):
+   ```
+   MEDIASOUP_ENABLED=true
+   MEDIASOUP_ANNOUNCED_IP=<the VPS PUBLIC IP>     # required — clients connect here
+   MEDIASOUP_LISTEN_IP=0.0.0.0
+   MEDIASOUP_MIN_PORT=40000
+   MEDIASOUP_MAX_PORT=40100
+   ```
+2. **Open the UDP media port range** on the host and any cloud firewall, and publish it from the
+   `app` container in `docker-compose.yml`:
+   ```yaml
+   app:
+     # ...
+     ports:
+       - "40000-40100:40000-40100/udp"
+   ```
+   (mediasoup binds RTP inside this range; `MEDIASOUP_ANNOUNCED_IP` is what it advertises to clients.)
+3. **Run a TURN server** so users behind strict/symmetric NATs can still connect — without it some
+   students silently fail to join. Add **coturn** as a Compose service (or a managed TURN), open its
+   ports (3478/tcp+udp, and a UDP relay range), and — once you wire client ICE servers — point the
+   room client at it. For a small launch you can start SFU-off and add this when you need it.
+4. **Native worker binary:** mediasoup ships a prebuilt worker in the npm package, so the Docker
+   build needs nothing extra. (This project blocks install scripts; the worker still works because
+   it's bundled, not built on install.)
+
+Notes: the SFU runs **inside the `server.mjs` process** (the same one Socket.io uses), so no separate
+media service for v1 of the SFU. It scales with participants (forwarding, not mixing); size the VPS
+accordingly and cap participants per room as usage grows.
+
 ## 9. Post-deploy smoke tests
 
 Run through these on the live domain before announcing:

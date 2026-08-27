@@ -7,6 +7,17 @@ import { writeAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
+/**
+ * Whether the mediasoup SFU is active. Mirrors `mediaEnabled()` in
+ * lib/media/mediasoup.ts, inlined so this Next route never imports the native
+ * mediasoup module (which lives only in the custom Socket.io server process).
+ */
+function sfuEnabled(): boolean {
+  if (process.env.MEDIASOUP_ENABLED === "false") return false;
+  if (process.env.MEDIASOUP_ENABLED === "true") return true;
+  return process.env.NODE_ENV !== "production";
+}
+
 /** Coach of the class, or a student enrolled in it / its batch. */
 async function access(classId: string, userId: string) {
   const cls = await db.class.findUnique({
@@ -73,6 +84,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
     isCoach,
     viewerName: payload.username,
+    sfuEnabled: sfuEnabled(),
     messages: messages.map((m) => ({
       id: m.id,
       userId: m.userId,
