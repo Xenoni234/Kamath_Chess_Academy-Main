@@ -13,8 +13,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const denied = requireRole(payload, ["HR", "HEAD"]);
     if (denied) return denied;
 
@@ -43,7 +51,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[batches/[id]] PATCH failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

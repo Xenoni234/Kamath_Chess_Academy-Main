@@ -33,6 +33,9 @@ export default function OpeningTrainerPage() {
   }, []);
 
   useEffect(() => {
+    // The state here is set inside an async callback, after an await — not
+    // synchronously in the effect body. The rule cannot see through the promise.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadLists();
   }, [loadLists]);
 
@@ -40,7 +43,9 @@ export default function OpeningTrainerPage() {
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     if (query.trim().length < 2) {
-      setCandidates([]);
+      // Clear on the same timer the results arrive on, so the effect body itself
+      // never sets state synchronously.
+      debounce.current = setTimeout(() => setCandidates([]), 0);
       return;
     }
     debounce.current = setTimeout(async () => {

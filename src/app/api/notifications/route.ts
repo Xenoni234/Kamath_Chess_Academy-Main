@@ -8,8 +8,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const [notifications, unread] = await Promise.all([
       db.notification.findMany({
         where: { userId: payload.userId },
@@ -19,7 +27,8 @@ export async function GET(request: NextRequest) {
       db.notification.count({ where: { userId: payload.userId, readAt: null } }),
     ]);
     return NextResponse.json({ success: true, notifications, unread });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[notifications] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

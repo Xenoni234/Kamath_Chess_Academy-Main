@@ -19,6 +19,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
   try {
     verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const { id } = await context.params;
 
     const repertoire = await db.openingRepertoire.findUnique({
@@ -52,7 +59,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         "Cache-Control": "private, no-store",
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[opening/[id]/download] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

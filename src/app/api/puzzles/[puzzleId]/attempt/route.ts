@@ -10,8 +10,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const { puzzleId } = await context.params;
     const body = await request.json();
     const parsed = puzzleAttemptSchema.safeParse(body);
@@ -66,7 +74,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pu
       repetition: data.repetition,
       intervalDays,
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[puzzles/[puzzleId]/attempt] POST failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

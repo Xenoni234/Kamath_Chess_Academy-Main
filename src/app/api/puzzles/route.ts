@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { puzzleQuerySchema } from "@/lib/validations/phase2";
 
 type LichessPuzzleResponse = {
   game?: { id?: string; pgn?: string };
@@ -27,12 +28,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
-    const theme = request.nextUrl.searchParams.get("theme");
-    const minRating = Number(request.nextUrl.searchParams.get("minRating") ?? 800);
-    const maxRating = Number(request.nextUrl.searchParams.get("maxRating") ?? 2000);
-    const limit = Math.min(Number(request.nextUrl.searchParams.get("limit") ?? 1), 25);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
+    const parsedQuery = puzzleQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
+    if (!parsedQuery.success) {
+      return NextResponse.json({ success: false, message: "Invalid puzzle filters" }, { status: 400 });
+    }
+    const { theme, minRating, maxRating, limit } = parsedQuery.data;
     const now = new Date();
     const dueAttempts = await db.puzzleAttempt.findMany({
       where: { userId: payload.userId, nextReviewAt: { lte: now }, puzzle: theme ? { themes: { has: theme } } : undefined },
@@ -93,7 +103,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, puzzles: [mapLichessPuzzle(await response.json())] });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[puzzles] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }
