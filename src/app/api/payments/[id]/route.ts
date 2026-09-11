@@ -20,7 +20,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
-  const denied = requireRole(payload, ["HR", "HEAD"]);
+  const denied = requireRole(payload, ["HEAD"]);
   if (denied) return denied;
 
   const { id } = await params;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
-import { canViewStudent, requireRole } from "@/lib/authz";
+import { canViewMoney, requireRole } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { createNotification } from "@/lib/notify";
 import { writeAuditLog } from "@/lib/audit";
@@ -36,9 +36,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Invalid filters" }, { status: 400 });
   }
   const { userId, status, limit } = parsed.data;
-  const isStaff = payload.role === "HR" || payload.role === "HEAD";
+  // Only the head sees the whole ledger. Everyone else must name a student and
+  // prove they may see that student's money — which for them means themselves,
+  // or their own child.
+  const isStaff = payload.role === "HEAD";
 
-  if (userId && !(await canViewStudent(payload, userId))) {
+  if (userId && !(await canViewMoney(payload, userId))) {
     return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
   }
   if (!userId && !isStaff) {
@@ -85,7 +88,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
-  const denied = requireRole(payload, ["HR", "HEAD"]);
+  // Recording a payment is the head's alone — see canManageMoney in lib/authz.
+  const denied = requireRole(payload, ["HEAD"]);
   if (denied) return denied;
 
   const body = await request.json().catch(() => null);

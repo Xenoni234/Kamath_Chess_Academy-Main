@@ -19,6 +19,7 @@ type Overview = {
   classes: ({ id: string; title: string; startsAt: string; status: string } | null)[];
   attendance: { id: string; status: string; markedAt: string; class: { id: string; title: string } | null }[];
   attendanceSummary: { total: number; present: number; rate: number | null };
+  showMoney: boolean;
   payments: {
     id: string;
     amount: number;
@@ -83,7 +84,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   }
   if (!data) return <div className="mx-auto max-w-3xl px-4 py-10 text-kca-gray-400">Loading…</div>;
 
-  const { student, ratings, games, reports, batches, classes, attendance, attendanceSummary, payments } = data;
+  const { student, ratings, games, reports, batches, classes, attendance, attendanceSummary, payments, showMoney } = data;
   const outstanding = payments.filter((p) => p.status === "PENDING").reduce((sum, p) => sum + p.amount, 0);
 
   return (
@@ -104,13 +105,18 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           </div>
           <div className="text-xs text-kca-gray-500">{attendanceSummary.total} classes marked</div>
         </div>
-        <div className="card">
-          <div className="text-xs uppercase tracking-wider text-kca-gray-400">Outstanding</div>
-          <div className={`mt-1 text-2xl font-semibold ${outstanding > 0 ? "text-kca-warning" : "text-kca-white"}`}>
-            ₹{outstanding.toLocaleString("en-IN")}
+        {/* Omitted, not zeroed. Rendering "₹0" to a coach who simply may not see
+            the figure would read as "this family owes nothing", which is worse
+            than showing nothing at all. */}
+        {showMoney && (
+          <div className="card">
+            <div className="text-xs uppercase tracking-wider text-kca-gray-400">Outstanding</div>
+            <div className={`mt-1 text-2xl font-semibold ${outstanding > 0 ? "text-kca-warning" : "text-kca-white"}`}>
+              ₹{outstanding.toLocaleString("en-IN")}
+            </div>
+            <div className="text-xs text-kca-gray-500">{payments.length} entries</div>
           </div>
-          <div className="text-xs text-kca-gray-500">{payments.length} entries</div>
-        </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -173,6 +179,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </Card>
 
+        {showMoney && (
         <Card title="Fees">
           {payments.length === 0 ? (
             <p className="text-sm text-kca-gray-400">No fee records.</p>
@@ -190,6 +197,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
             </ul>
           )}
         </Card>
+        )}
 
         <Card title="Game reports">
           {reports.length === 0 ? (

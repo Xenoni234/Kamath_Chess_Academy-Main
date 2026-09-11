@@ -14,7 +14,7 @@
 import fs from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
-import { canViewStudent } from "@/lib/authz";
+import { canViewMoney } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     if (!payment || !payment.invoice) {
       return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
     }
-    if (!(await canViewStudent(payload, payment.userId))) {
+    if (!(await canViewMoney(payload, payment.userId))) {
       return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
     }
     if (!payment.invoice.pdfUrl) {
