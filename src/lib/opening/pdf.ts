@@ -4,7 +4,7 @@
  * per-instance, so the download route may legitimately 404 for older repertoires
  * (regenerating restores it).
  */
-import puppeteer from "puppeteer";
+import { launchBrowser } from "@/lib/pdf/launch";
 import type { OpeningArtifact, RepertoireLine } from "./types";
 
 function htmlEscape(value: string) {
@@ -87,7 +87,7 @@ export async function renderOpeningPdf(
   lines: RepertoireLine[],
   guide: string,
 ): Promise<Buffer> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setContent(renderOpeningHtml(artifact, lines, guide), { waitUntil: "load" });

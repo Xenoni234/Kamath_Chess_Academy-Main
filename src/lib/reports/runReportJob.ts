@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { pristineFetch } from "@/lib/pristineFetch";
 import path from "node:path";
-import puppeteer from "puppeteer";
+import { launchBrowser } from "@/lib/pdf/launch";
 import { Resend } from "resend";
 import { db } from "@/lib/db";
 import { generateGameReportNarrative, type GameReportStats } from "@/lib/claude";
@@ -179,7 +179,7 @@ export async function runReportJob(data: ReportJobData): Promise<void> {
 
     const narrative = await generateGameReportNarrative(stats);
 
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await launchBrowser();
     let pdfBuffer: Buffer;
     try {
       const page = await browser.newPage();

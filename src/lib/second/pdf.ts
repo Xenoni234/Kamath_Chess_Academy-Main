@@ -5,7 +5,7 @@
  * (src/lib/reports/runReportJob.ts). Written to /tmp, which is ephemeral and
  * per-instance, so the download route may legitimately 404 for older dossiers.
  */
-import puppeteer from "puppeteer";
+import { launchBrowser } from "@/lib/pdf/launch";
 import { SOURCE_LABEL } from "@/lib/second/types";
 import type { ProfileArtifact, RepertoireLine } from "@/lib/second/types";
 
@@ -307,7 +307,7 @@ export async function renderDossierPdf(
   lines: RepertoireLine[],
   narrative: string,
 ): Promise<Buffer> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setContent(renderDossierHtml(artifact, lines, narrative), { waitUntil: "load" });
