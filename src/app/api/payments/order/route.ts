@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyAccessToken } from "@/lib/auth";
-import { canViewStudent } from "@/lib/authz";
+import { canViewMoney } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
 import { isPaymentsEnabled, razorpayClient, toPaise, publishableKeyId } from "@/lib/razorpay";
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     if (!payment) {
       return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
     }
-    if (!(await canViewStudent(payload, payment.userId))) {
+    if (!(await canViewMoney(payload, payment.userId))) {
       return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
     }
     if (payment.status !== "PENDING") {

@@ -62,6 +62,7 @@ app.prepare().then(async () => {
     console.log(`> KCA Platform ready on http://localhost:${port}`)
     console.log('> Socket.io server attached')
   })
+
 })
 
 /**

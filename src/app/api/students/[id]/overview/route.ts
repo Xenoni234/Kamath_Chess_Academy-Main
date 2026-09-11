@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
-import { canViewStudent } from "@/lib/authz";
+import { canViewStudent, canViewMoney } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -39,6 +39,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!student || student.role !== "STUDENT") {
     return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
   }
+
+  // Fees are the head's, the student's and their parent's — never a coach's.
+  const showMoney = await canViewMoney(payload, studentId);
 
   const [ratings, games, reports, enrolments, attendance, payments] = await Promise.all([
     db.rating.findMany({
@@ -83,22 +86,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         class: { select: { id: true, title: true, startsAt: true } },
       },
     }),
-    db.payment.findMany({
-      where: { userId: studentId },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: {
-        id: true,
-        amount: true,
-        currency: true,
-        status: true,
-        method: true,
-        description: true,
-        dueDate: true,
-        paidAt: true,
-        createdAt: true,
-      },
-    }),
+    // A coach passes canViewStudent — they teach this child — but must not see
+    // what the family pays. Fetch nothing rather than fetch-and-filter, so the
+    // rows never reach this process for someone who may not have them.
+    showMoney
+      ? db.payment.findMany({
+          where: { userId: studentId },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            amount: true,
+            currency: true,
+            status: true,
+            method: true,
+            description: true,
+            dueDate: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   const present = attendance.filter((a) => a.status === "PRESENT" || a.status === "LATE").length;
@@ -124,6 +132,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     classes: enrolments.map((e) => e.class).filter(Boolean),
     attendance,
     attendanceSummary: { total: attendance.length, present, rate: attendance.length ? Math.round((present / attendance.length) * 100) : null },
+    showMoney,
     payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
   });
 }

@@ -4,7 +4,8 @@ import { verifyAccessToken } from "@/lib/auth";
 import { hasRole } from "@/lib/authz";
 import AdminPaymentsClient from "./AdminPaymentsClient";
 
-/** HR/HEAD only — the fee ledger. */
+/** HEAD only — the fee ledger. Fees are the academy owner's alone: not coaches,
+ *  and not HR. See canViewMoney / canManageMoney in lib/authz. */
 export default async function AdminPaymentsPage() {
   const token = (await cookies()).get("kca_access_token")?.value ?? "";
   let role = "";
@@ -13,6 +14,6 @@ export default async function AdminPaymentsPage() {
   } catch {
     redirect("/login");
   }
-  if (!hasRole(role as never, ["HR", "HEAD"])) redirect(`/dashboard/${role.toLowerCase()}`);
+  if (!hasRole(role as never, ["HEAD"])) redirect(`/dashboard/${role.toLowerCase()}`);
   return <AdminPaymentsClient />;
 }
