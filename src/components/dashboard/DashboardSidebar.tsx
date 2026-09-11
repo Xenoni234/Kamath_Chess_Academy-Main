@@ -4,7 +4,27 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, LogOut, Swords, Trophy, Bot, Activity, Puzzle, Map, FileText, CalendarDays, CalendarPlus, Medal, Brain, GraduationCap } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Brain,
+  CalendarDays,
+  CalendarPlus,
+  FileText,
+  GraduationCap,
+  History,
+  Home,
+  IndianRupee,
+  Inbox,
+  LogOut,
+  Map,
+  Medal,
+  Puzzle,
+  Swords,
+  Trophy,
+  UserCog,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -46,21 +66,42 @@ export default function DashboardSidebar({ username, role }: { username: string;
 
   // Define sidebar items in order:
   // Overview / Home -> Play -> Games -> Puzzles
+  // Every item declares its roles. Previously only 3 of 13 did, so a parent was
+  // shown a rated-game lobby and a puzzle trainer, and HR saw "Play vs Human" —
+  // the nav described a student product regardless of who was signed in.
   const navItems: NavItem[] = [
     { href: `/dashboard/${roleLower}`, label: "Overview", icon: Home },
-    { href: "/dashboard/play", label: "Play vs Human", icon: Swords },
-    { href: "/dashboard/play-engine", label: "Play Engine", icon: Bot },
-    { href: "/dashboard/analysis", label: "Analysis", icon: Activity },
-    { href: "/dashboard/puzzles", label: "Puzzles", icon: Puzzle },
-    { href: "/dashboard/openings", label: "Openings", icon: Map },
-    { href: "/dashboard/reports", label: "Reports", icon: FileText },
-    { href: "/dashboard/games", label: "Games", icon: Trophy },
-    { href: "/dashboard/tournaments", label: "Tournaments", icon: Medal },
-    { href: "/dashboard/second", label: "Second AI", icon: Brain, roles: ["STUDENT", "COACH", "HR", "HEAD"] },
-    { href: "/dashboard/opening", label: "Opening Trainer", icon: GraduationCap, roles: ["STUDENT", "COACH", "HR", "HEAD"] },
-    // Phase 3 items are added here per track, each with a `roles` gate.
+
+    // --- Training (students; coaches keep it to demonstrate and prepare) ---
+    { href: "/dashboard/play", label: "Play vs Human", icon: Swords, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/play-engine", label: "Play Engine", icon: Bot, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/analysis", label: "Analysis", icon: Activity, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/puzzles", label: "Puzzles", icon: Puzzle, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/openings", label: "Openings", icon: Map, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/opening", label: "Opening Trainer", icon: GraduationCap, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/second", label: "Second AI", icon: Brain, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/games", label: "Games", icon: Trophy, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/reports", label: "Reports", icon: FileText, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/tournaments", label: "Tournaments", icon: Medal, roles: ["STUDENT", "COACH", "HR", "HEAD"] },
+
+    // --- Parent ---
+    { href: "/dashboard/children", label: "My Children", icon: Users, roles: ["PARENT"] },
+
+    // --- Coach ---
+    { href: "/dashboard/roster", label: "My Students", icon: Users, roles: ["COACH"] },
+
+    // --- Everyone who attends or runs a class ---
     { href: "/dashboard/classes", label: "Classes", icon: CalendarDays },
+
+    // --- Students and their families ---
+    { href: "/dashboard/fees", label: "Fees", icon: IndianRupee, roles: ["STUDENT", "PARENT"] },
+
+    // --- Academy administration ---
     { href: "/dashboard/schedule", label: "Schedule", icon: CalendarPlus, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/users", label: "People", icon: UserCog, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/payments", label: "Fees", icon: IndianRupee, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/contact", label: "Enquiries", icon: Inbox, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/audit", label: "Audit log", icon: History, roles: ["HEAD"] },
   ];
 
   const roleUpper = role.toUpperCase();

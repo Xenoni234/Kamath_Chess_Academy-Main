@@ -11,6 +11,22 @@ const roleRoutes: Record<string, string[]> = {
   "/dashboard/coach": ["COACH"],
   "/dashboard/hr": ["HR", "HEAD"],
   "/dashboard/head": ["HEAD"],
+  "/dashboard/admin": ["HR", "HEAD"],
+  "/dashboard/schedule": ["HR", "HEAD"],
+  "/dashboard/children": ["PARENT", "HR", "HEAD"],
+  "/dashboard/roster": ["COACH", "HR", "HEAD"],
+};
+
+/**
+ * Where each role belongs. A lookup rather than interpolating the role into a
+ * path — a redirect target should never be built from a token-derived string.
+ */
+const HOME_FOR_ROLE: Record<string, string> = {
+  STUDENT: "/dashboard/student",
+  PARENT: "/dashboard/parent",
+  COACH: "/dashboard/coach",
+  HR: "/dashboard/hr",
+  HEAD: "/dashboard/head",
 };
 
 function base64UrlToBytes(input: string) {
@@ -53,6 +69,14 @@ async function verifyHs256(token: string, secret: string): Promise<JwtPayload | 
   return decoded;
 }
 
+/** Send them to sign in, remembering where they were headed. */
+function loginWithReturn(request: NextRequest, pathname: string) {
+  const url = new URL("/login", request.url);
+  // Only ever a same-site path, so this cannot become an open redirect.
+  if (pathname.startsWith("/dashboard")) url.searchParams.set("next", pathname);
+  return url;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -64,19 +88,20 @@ export async function proxy(request: NextRequest) {
   const secret = process.env.JWT_SECRET;
 
   if (!token || !secret) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(loginWithReturn(request, pathname));
   }
 
   const payload = await verifyHs256(token, secret);
 
   if (!payload?.role) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(loginWithReturn(request, pathname));
   }
 
   const matchedRoute = Object.keys(roleRoutes).find((route) => pathname.startsWith(route));
 
   if (matchedRoute && !roleRoutes[matchedRoute].includes(payload.role)) {
-    return NextResponse.redirect(new URL(`/dashboard/${payload.role.toLowerCase()}`, request.url));
+    const home = HOME_FOR_ROLE[payload.role] ?? "/login";
+    return NextResponse.redirect(new URL(home, request.url));
   }
 
   return NextResponse.next();
