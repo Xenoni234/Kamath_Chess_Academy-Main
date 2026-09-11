@@ -1,21 +1,19 @@
+import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { createNotifications } from "@/lib/notify";
 import { writeAuditLog } from "@/lib/audit";
+// The SFU switch comes from its own dependency-free module so this route never
+// imports the native mediasoup binding, which exists only in the socket server.
+import { mediaEnabledFromEnv } from "@/lib/media/enabled";
 
 export const runtime = "nodejs";
 
-/**
- * Whether the mediasoup SFU is active. Mirrors `mediaEnabled()` in
- * lib/media/mediasoup.ts, inlined so this Next route never imports the native
- * mediasoup module (which lives only in the custom Socket.io server process).
- */
-function sfuEnabled(): boolean {
-  if (process.env.MEDIASOUP_ENABLED === "false") return false;
-  if (process.env.MEDIASOUP_ENABLED === "true") return true;
-  return process.env.NODE_ENV !== "production";
+/** 128 bits of URL-safe randomness — not derivable from the class id. */
+function newRoomKey(): string {
+  return crypto.randomBytes(16).toString("base64url");
 }
 
 /** Coach of the class, or a student enrolled in it / its batch. */
@@ -31,6 +29,7 @@ async function access(classId: string, userId: string) {
       endsAt: true,
       meetingUrl: true,
       liveStartedAt: true,
+      videoRoomKey: true,
       batchId: true,
       coach: { select: { userId: true, user: { select: { username: true } } } },
     },
@@ -62,6 +61,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // 404, not 403 — don't reveal a class exists to someone not in it.
   if (!allowed) return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
 
+  // The Jitsi room used to be named `KCA-<class id>`, i.e. derivable by anyone who
+  // knew or guessed a class id — an unauthenticated room full of minors. The room
+  // name is now a secret, generated on first authorised view and handed out ONLY
+  // past the `allowed` check above, so it never reaches a non-participant.
+  let videoRoomKey = cls.videoRoomKey;
+  if (!videoRoomKey) {
+    videoRoomKey = newRoomKey();
+    try {
+      await db.class.update({ where: { id }, data: { videoRoomKey } });
+    } catch {
+      // Lost a race with a concurrent first viewer; theirs is authoritative.
+      const fresh = await db.class.findUnique({ where: { id }, select: { videoRoomKey: true } });
+      videoRoomKey = fresh?.videoRoomKey ?? videoRoomKey;
+    }
+  }
+
   const messages = await db.message.findMany({
     where: { classId: id },
     orderBy: { createdAt: "asc" },
@@ -80,11 +95,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       endsAt: cls.endsAt,
       meetingUrl: cls.meetingUrl,
       liveStartedAt: cls.liveStartedAt,
+      videoRoomKey,
       coachName: cls.coach?.user.username ?? null,
     },
     isCoach,
     viewerName: payload.username,
-    sfuEnabled: sfuEnabled(),
+    sfuEnabled: mediaEnabledFromEnv(),
     messages: messages.map((m) => ({
       id: m.id,
       userId: m.userId,
@@ -125,7 +141,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   if (parsed.data.action === "start") {
-    await db.class.update({ where: { id }, data: { status: "ONGOING", liveStartedAt: new Date() } });
+    // Rotate the room name on every start. A link forwarded out of last week's
+    // class must not open this week's — obscurity only holds if it expires.
+    await db.class.update({
+      where: { id },
+      data: { status: "ONGOING", liveStartedAt: new Date(), videoRoomKey: newRoomKey() },
+    });
     // Notify enrolled students the class is live.
     const enrollments = await db.classEnrollment.findMany({
       where: { OR: [{ classId: id }, ...(cls.batchId ? [{ batchId: cls.batchId }] : [])] },
