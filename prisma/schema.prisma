@@ -54,6 +54,13 @@ enum ClassStatus {
   CANCELLED
 }
 
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
 enum PaymentStatus {
   PENDING
   COMPLETED
@@ -114,6 +121,31 @@ model User {
   opponentProfiles OpponentProfile[]
   savedOpenings   SavedOpening[]
   classMessages   Message[]
+  attendance       ClassAttendance[] @relation("AttendanceStudent")
+  attendanceMarked ClassAttendance[] @relation("AttendanceMarker")
+  recordedPayments Payment[]         @relation("PaymentRecorder")
+  gameAnnotations  GameAnnotation[]  @relation("GameAnnotations")
+
+  /// DPDPA consent, stored as timestamps rather than booleans: a boolean cannot
+  /// prove *when* consent was given, which is the one thing a regulator asks for.
+  /// These used to live only inside an AuditLog JSON blob, and the three mandatory
+  /// consents were validated at registration and then thrown away entirely.
+  ///
+  /// NULL means "registered before consent was recorded" — render it as UNKNOWN,
+  /// never as refused. scripts/backfillConsent.ts fills what the audit log can.
+  consentVersion          String?
+  consentTermsAt          DateTime?
+  consentAgeAt            DateTime?
+  consentDataProcessingAt DateTime?
+  consentMarketing        Boolean   @default(false)
+  consentMarketingAt      DateTime?
+  consentSms              Boolean   @default(false)
+  consentSmsAt            DateTime?
+
+  /// Set when the identity fields were scrubbed under a DPDPA erasure request.
+  /// Erasure is an UPDATE, not a DELETE: financial records (Payment/Invoice) must
+  /// survive for statutory retention and still point at this row.
+  anonymizedAt DateTime?
 
   @@index([role])
   @@index([isActive])
@@ -233,6 +265,8 @@ model Game {
   // "My games" filters `OR: [whiteUserId, blackUserId]` and sorts playedAt desc.
   // The single-column indexes served the filter but left the sort to an external
   // sort; these composites cover both halves of the OR.
+  annotations GameAnnotation[]
+
   @@index([whiteUserId, playedAt])
   @@index([blackUserId, playedAt])
   @@index([timeFormat, playedAt])
@@ -374,8 +408,16 @@ model Class {
   coach       CoachProfile?     @relation(fields: [coachId], references: [id], onDelete: SetNull)
   enrollments ClassEnrollment[]
   messages    Message[]
+  attendance  ClassAttendance[]
   /** When the coach opened the live room (Phase 6 v1). Null = never gone live. */
   liveStartedAt DateTime?
+
+  /// Random room name for the embedded Jitsi call. The room used to be named
+  /// `KCA-<class cuid>`, so anyone who could guess or forward a URL could walk
+  /// into a class of minors with no KCA account. Generated lazily behind the
+  /// authorisation gate and ROTATED every time the coach starts the class, so a
+  /// forwarded link dies with the session.
+  videoRoomKey String? @unique
 
   @@index([status, startsAt])
   @@index([batchId])
@@ -419,14 +461,32 @@ model Payment {
   status      PaymentStatus @default(PENDING)
   provider    String?
   providerRef String?
+  /** How an offline payment arrived: CASH / UPI / BANK / CARD / OTHER. Null for
+   *  gateway payments, which carry `provider`/`providerRef` instead. */
+  method      String?
+  /** What the payment is for, e.g. "October tuition". */
+  description String?
+  note        String?
+  dueDate     DateTime?
+  /** The staff member who recorded it. Null for gateway-created rows. */
+  recordedById String?
+  recordedBy   User?        @relation("PaymentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
   paidAt      DateTime?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   invoice     Invoice?
 
+  /// Razorpay's payment id (`pay_...`). `providerRef` holds the *order* id, which
+  /// is the stable idempotency key; this is the settlement reference.
+  providerPaymentId String?
+
   @@index([userId, status])
   @@index([providerRef])
+  /// Two webhook deliveries for one order must not create two COMPLETED rows.
+  /// Composite rather than a bare unique on providerRef: every offline row is
+  /// (null, null), and Postgres allows unlimited rows where any column is NULL.
+  @@unique([provider, providerRef])
 }
 
 model Invoice {
@@ -475,6 +535,10 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([action])
+  /// The viewer's default query is unfiltered, newest-first. Neither index above
+  /// serves it: [userId, createdAt] needs a userId prefix and [action] has no sort
+  /// component. Cheap to add now, expensive at ten million rows.
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -610,4 +674,103 @@ model SavedOpening {
   @@unique([userId, repertoireId])
   @@index([userId, createdAt])
   @@map("saved_openings")
+}
+
+/**
+ * Attendance for one student in one class (Phase 3 completion).
+ *
+ * Unique per class+student so marking is idempotent — a coach correcting a
+ * mistake updates the row rather than creating a second, contradictory one.
+ */
+model ClassAttendance {
+  id         String           @id @default(cuid())
+  classId    String
+  userId     String
+  status     AttendanceStatus @default(PRESENT)
+  note       String?
+  markedById String?
+  markedAt   DateTime         @default(now())
+  class      Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  user       User             @relation("AttendanceStudent", fields: [userId], references: [id], onDelete: Cascade)
+  markedBy   User?            @relation("AttendanceMarker", fields: [markedById], references: [id], onDelete: SetNull)
+
+  @@unique([classId, userId])
+  @@index([userId, markedAt])
+  @@index([classId])
+  @@map("class_attendance")
+}
+
+/**
+ * A public contact-form enquiry.
+ *
+ * Previously the handler only console.logged the submission and told the sender
+ * "received" — every lead was lost, and their name/email/mobile went to the log
+ * aggregator in plaintext.
+ */
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  mobile    String?
+  message   String   @db.Text
+  handled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([handled, createdAt])
+  @@map("contact_messages")
+}
+
+/// Per-financial-year invoice sequence. India's FY runs April to March, so numbers
+/// read KCA-2026-27-0001.
+///
+/// A counter table rather than "count existing invoices inside a transaction":
+/// under Postgres' default Read Committed two concurrent transactions both read N
+/// and both write N+1, and one loses to the unique index on Invoice.number.
+/// Serializable would fix that but turns every invoice into a retry-on-40001 loop.
+/// This is one atomic INSERT ... ON CONFLICT DO UPDATE SET seq = seq + 1 RETURNING
+/// seq — race-free in a single round trip.
+///
+/// Numbers can have GAPS when a job fails after reserving one. That is correct for
+/// an invoice sequence: a reserved-then-abandoned number must never be reused.
+model InvoiceCounter {
+  fy        String   @id
+  seq       Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("invoice_counters")
+}
+
+/// One row per gateway webhook delivery id (Razorpay's `x-razorpay-event-id`).
+/// The handler inserts FIRST; a P2002 means this delivery is a retry and it returns
+/// 200 without re-processing. Razorpay retries on any non-2xx, so without this a
+/// slow response produces duplicate settlements.
+model ProcessedWebhook {
+  id         String   @id
+  provider   String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+  @@map("processed_webhooks")
+}
+
+/// A coach's note attached to one half-move of one game.
+///
+/// `ply` is 1-based and matches PositionNode.ply in src/lib/engine/analysis.ts —
+/// ply 1 is the position AFTER White's first move. Unique per coach+ply so editing
+/// a note updates it rather than stacking duplicates, while two coaches may each
+/// annotate the same move.
+model GameAnnotation {
+  id        String   @id @default(cuid())
+  gameId    String
+  coachId   String
+  ply       Int
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  coach     User     @relation("GameAnnotations", fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, coachId, ply])
+  @@index([gameId, ply])
+  @@map("game_annotations")
 }
