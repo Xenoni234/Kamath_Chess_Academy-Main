@@ -421,6 +421,20 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   `LICHESS_API_TOKEN` it returns no novelties rather than guessing. A strong
   opponent's mainlines legitimately yield zero novelties — that is a real
   result, not a bug.
+- **Never run two dev servers against this repo at once.** They share
+  `.next/dev/cache/turbopack`, and two processes writing that database corrupt it.
+  The symptom is deeply misleading: Turbopack reports a **syntax error in a file
+  that is perfectly valid** (seen as `Unterminated regexp literal` in
+  `LoginForm.tsx`, which typechecked clean the whole time), plus panics about
+  missing `.sst` files. `npm run dev` does warn — *"Another next dev server is
+  already running"* — but if the first one was started by something else (an agent
+  driving the browser preview, say) it is easy to miss. The fix is not to debug the
+  file:
+
+  ```bash
+  pkill -f "node server.mjs"; rm -rf .next && npm run dev
+  ```
+
 - **iCloud Desktop sync will destroy this repo — it is only safe here because
   iCloud Drive is switched off.** When it was on, the Desktop plus ~48k
   `node_modules` files and a constantly-rewritten `.next/` caused three separate

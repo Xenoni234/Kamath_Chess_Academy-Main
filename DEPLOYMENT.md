@@ -258,7 +258,6 @@ Copy `.env.example` → `.env.production` and fill it in. **Required** to boot a
 | `JWT_ACCESS_EXPIRY`, `JWT_REFRESH_EXPIRY` | e.g. `15m` / `30d`. |
 | `DATABASE_URL` | Supabase **pooled** (6543, `?pgbouncer=true`) — runtime queries. |
 | `DIRECT_URL` | Supabase **direct** (5432) — migrations only. |
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase project. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | App cache / presence. |
 | `QUEUE_REDIS_URL` | `redis://redis:6379` (the Compose service) — **required for durable jobs**; without it jobs run inline and don't survive a restart. |
 | `LICHESS_API_TOKEN` | Opening Explorer + novelty mining + Opening Trainer. Any Lichess personal token. |
@@ -268,6 +267,13 @@ Copy `.env.example` → `.env.production` and fill it in. **Required** to boot a
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | For `openai-compatible` (Groq). *(or set `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`.)* |
 | `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SOCKET_URL` | Both `https://kamathchessacademy.com`. |
 | `NEXT_PUBLIC_APP_NAME` | "Kamath Chess Academy". |
+
+**Not needed, despite the name.** `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` were listed here as
+required and are not: nothing in `src/`, `server.mjs` or `prisma/` reads them, and
+`@supabase/*` is not a dependency. Supabase is used purely as managed Postgres,
+reached through Prisma and `pg` over `DATABASE_URL`/`DIRECT_URL`. Auth is this
+project's own JWT. Leave them unset.
 
 **Optional / off for launch:**
 - `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` — only if you run the Neo4j service (see §8).
