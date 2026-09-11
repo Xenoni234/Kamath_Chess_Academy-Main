@@ -7,6 +7,15 @@ import {
   transportParams,
 } from "../../media/mediasoup.ts";
 import { canAccess } from "./classHandlers.ts";
+import {
+  mediaConnectSchema,
+  mediaConsumeSchema,
+  mediaConsumerSchema,
+  mediaProduceSchema,
+  mediaProducerSchema,
+  mediaRoomSchema,
+  mediaTransportSchema,
+} from "../../validations/socket.ts";
 
 /**
  * mediasoup signalling over Socket.io (Phase 6 v2).
@@ -71,57 +80,88 @@ function cleanupPeer(io: Server, classId: string, socketId: string) {
 
 type Ack<T> = (response: T) => void;
 
+type AnySchema = { safeParse: (v: unknown) => { success: boolean; data?: unknown } };
+
+/**
+ * Wrap a signalling handler so that a malformed payload is answered, not thrown.
+ *
+ * Every handler here is `async`; a throw inside one becomes an unhandled promise
+ * rejection, and Node's default action for that is to terminate — taking the whole
+ * app down with it. So: validate first, and catch everything.
+ */
+function guarded<T>(
+  schema: AnySchema,
+  handler: (data: T, cb: Ack<unknown>) => Promise<void> | void,
+) {
+  return async (raw: unknown, cb?: Ack<unknown>) => {
+    const respond: Ack<unknown> = typeof cb === "function" ? cb : () => {};
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      respond({ error: "invalid payload" });
+      return;
+    }
+    try {
+      await handler(parsed.data as T, respond);
+    } catch (error) {
+      console.error("[media] handler failed:", error);
+      respond({ error: "media error" });
+    }
+  };
+}
+
 export function setupMediaHandlers(io: Server, socket: Socket) {
   const joined = new Set<string>();
   const inRoom = (classId: string) => socket.rooms.has(room(classId));
 
-  socket.on("media:capabilities", async ({ classId }: { classId: string }, cb: Ack<unknown>) => {
-    // Entry point: authorize independently (don't depend on class:join ordering)
-    // and join the room so subsequent media events pass the `inRoom` gate.
-    if (!mediaEnabled()) return cb({ error: "unavailable" });
-    if (!(await canAccess(classId, socket.data.userId))) return cb({ error: "forbidden" });
-    socket.join(room(classId));
-    const router = await getRouter(classId);
-    joined.add(classId);
-    cb({ rtpCapabilities: router.rtpCapabilities });
-  });
+  socket.on(
+    "media:capabilities",
+    guarded<{ classId: string }>(mediaRoomSchema, async ({ classId }, cb) => {
+      // Entry point: authorize independently (don't depend on class:join ordering)
+      // and join the room so subsequent media events pass the `inRoom` gate.
+      if (!mediaEnabled()) return cb({ error: "unavailable" });
+      if (!(await canAccess(classId, socket.data.userId))) return cb({ error: "forbidden" });
+      socket.join(room(classId));
+      const router = await getRouter(classId);
+      joined.add(classId);
+      cb({ rtpCapabilities: router.rtpCapabilities });
+    }),
+  );
 
   socket.on(
     "media:create-transport",
-    async ({ classId }: { classId: string; direction: "send" | "recv" }, cb: Ack<unknown>) => {
+    guarded<{ classId: string }>(mediaTransportSchema, async ({ classId }, cb) => {
       if (!mediaEnabled() || !inRoom(classId)) return cb({ error: "unavailable" });
       const router = await getRouter(classId);
       const transport = await createWebRtcTransport(router);
       getPeer(classId, socket).transports.set(transport.id, transport);
       cb(transportParams(transport));
-    },
+    }),
   );
 
   socket.on(
     "media:connect-transport",
-    async (
-      { classId, transportId, dtlsParameters }: { classId: string; transportId: string; dtlsParameters: types.DtlsParameters },
-      cb: Ack<unknown>,
-    ) => {
-      const transport = getPeer(classId, socket).transports.get(transportId);
-      if (!transport) return cb({ error: "no transport" });
-      await transport.connect({ dtlsParameters });
-      cb({ ok: true });
-    },
+    guarded<{ classId: string; transportId: string; dtlsParameters: types.DtlsParameters }>(
+      mediaConnectSchema,
+      async ({ classId, transportId, dtlsParameters }, cb) => {
+        if (!inRoom(classId)) return cb({ error: "unavailable" });
+        const transport = getPeer(classId, socket).transports.get(transportId);
+        if (!transport) return cb({ error: "no transport" });
+        await transport.connect({ dtlsParameters });
+        cb({ ok: true });
+      },
+    ),
   );
 
   socket.on(
     "media:produce",
-    async (
-      {
-        classId,
-        transportId,
-        kind,
-        rtpParameters,
-        appData,
-      }: { classId: string; transportId: string; kind: types.MediaKind; rtpParameters: types.RtpParameters; appData?: Record<string, unknown> },
-      cb: Ack<unknown>,
-    ) => {
+    guarded<{
+      classId: string;
+      transportId: string;
+      kind: types.MediaKind;
+      rtpParameters: types.RtpParameters;
+      appData?: Record<string, unknown>;
+    }>(mediaProduceSchema, async ({ classId, transportId, kind, rtpParameters, appData }, cb) => {
+      if (!inRoom(classId)) return cb({ error: "unavailable" });
       const peer = getPeer(classId, socket);
       const transport = peer.transports.get(transportId);
       if (!transport) return cb({ error: "no transport" });
@@ -136,20 +176,18 @@ export function setupMediaHandlers(io: Server, socket: Socket) {
         appData: appData ?? {},
       });
       cb({ id: producer.id });
-    },
+    }),
   );
 
   socket.on(
     "media:consume",
-    async (
-      {
-        classId,
-        transportId,
-        producerId,
-        rtpCapabilities,
-      }: { classId: string; transportId: string; producerId: string; rtpCapabilities: types.RtpCapabilities },
-      cb: Ack<unknown>,
-    ) => {
+    guarded<{
+      classId: string;
+      transportId: string;
+      producerId: string;
+      rtpCapabilities: types.RtpCapabilities;
+    }>(mediaConsumeSchema, async ({ classId, transportId, producerId, rtpCapabilities }, cb) => {
+      if (!inRoom(classId)) return cb({ error: "unavailable" });
       const router = await getRouter(classId);
       if (!router.canConsume({ producerId, rtpCapabilities })) return cb({ error: "cannot consume" });
       const peer = getPeer(classId, socket);
@@ -164,50 +202,67 @@ export function setupMediaHandlers(io: Server, socket: Socket) {
         rtpParameters: consumer.rtpParameters,
         appData: consumer.appData,
       });
-    },
+    }),
   );
 
   socket.on(
     "media:resume-consumer",
-    async ({ classId, consumerId }: { classId: string; consumerId: string }, cb: Ack<unknown>) => {
+    guarded<{ classId: string; consumerId: string }>(mediaConsumerSchema, async ({ classId, consumerId }, cb) => {
       const consumer = getPeer(classId, socket).consumers.get(consumerId);
       if (!consumer) return cb({ error: "no consumer" });
       await consumer.resume();
       cb({ ok: true });
-    },
+    }),
   );
 
   // Existing producers in the room, so a joiner can consume what's already live.
-  socket.on("media:producers", ({ classId }: { classId: string }, cb: Ack<unknown>) => {
-    const peers = rooms.get(classId);
-    const list: unknown[] = [];
-    if (peers) {
-      for (const [peerId, peer] of peers) {
-        if (peerId === socket.id) continue;
-        for (const producer of peer.producers.values()) {
-          list.push({ producerId: producer.id, peerId, username: peer.username, kind: producer.kind, appData: producer.appData });
+  socket.on(
+    "media:producers",
+    guarded<{ classId: string }>(mediaRoomSchema, ({ classId }, cb) => {
+      const peers = rooms.get(classId);
+      const list: unknown[] = [];
+      if (peers) {
+        for (const [peerId, peer] of peers) {
+          if (peerId === socket.id) continue;
+          for (const producer of peer.producers.values()) {
+            list.push({ producerId: producer.id, peerId, username: peer.username, kind: producer.kind, appData: producer.appData });
+          }
         }
       }
-    }
-    cb({ producers: list });
-  });
+      cb({ producers: list });
+    }),
+  );
 
   // Explicit producer close (e.g. the coach stops screen-sharing).
-  socket.on("media:close-producer", ({ classId, producerId }: { classId: string; producerId: string }) => {
-    const peer = rooms.get(classId)?.get(socket.id);
-    const producer = peer?.producers.get(producerId);
-    if (!producer) return;
-    producer.close();
-    peer!.producers.delete(producerId);
-    io.to(room(classId)).emit("media:producer-closed", { producerId });
-  });
+  socket.on(
+    "media:close-producer",
+    guarded<{ classId: string; producerId: string }>(mediaProducerSchema, ({ classId, producerId }, cb) => {
+      const peer = rooms.get(classId)?.get(socket.id);
+      const producer = peer?.producers.get(producerId);
+      if (!producer) return cb({ error: "no producer" });
+      producer.close();
+      peer!.producers.delete(producerId);
+      io.to(room(classId)).emit("media:producer-closed", { producerId });
+      cb({ ok: true });
+    }),
+  );
 
-  socket.on("media:leave", ({ classId }: { classId: string }) => {
-    joined.delete(classId);
-    cleanupPeer(io, classId, socket.id);
-  });
+  socket.on(
+    "media:leave",
+    guarded<{ classId: string }>(mediaRoomSchema, ({ classId }, cb) => {
+      joined.delete(classId);
+      cleanupPeer(io, classId, socket.id);
+      cb({ ok: true });
+    }),
+  );
 
   socket.on("disconnect", () => {
-    for (const classId of joined) cleanupPeer(io, classId, socket.id);
+    for (const classId of joined) {
+      try {
+        cleanupPeer(io, classId, socket.id);
+      } catch (error) {
+        console.error("[media] cleanup on disconnect failed:", error);
+      }
+    }
   });
 }

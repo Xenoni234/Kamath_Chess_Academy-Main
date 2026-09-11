@@ -38,9 +38,16 @@ app.prepare().then(async () => {
     await handle(req, res, parsedUrl)
   })
 
+  // In production the origin must be explicit. Falling back to localhost would
+  // silently allow credentialed sockets from a dev origin instead of the domain.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (!dev && !appUrl) {
+    throw new Error('NEXT_PUBLIC_APP_URL must be set in production (Socket.io CORS origin)')
+  }
+
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+      origin: appUrl || 'http://localhost:3000',
       credentials: true
     }
   })
@@ -48,8 +55,27 @@ app.prepare().then(async () => {
   const { setupSocketServer } = await import('./src/lib/socket/server.js')
   setupSocketServer(io)
 
-  httpServer.listen(3000, () => {
-    console.log('> KCA Platform ready on http://localhost:3000')
+  // Hosts inject PORT and health-check it; a hardcoded 3000 fails those checks.
+  const port = Number(process.env.PORT) || 3000
+
+  httpServer.listen(port, () => {
+    console.log(`> KCA Platform ready on http://localhost:${port}`)
     console.log('> Socket.io server attached')
   })
+})
+
+/**
+ * Last line of defence.
+ *
+ * This one process serves the web app, the API and every socket. Node's default
+ * action on an unhandled rejection is to terminate, so a single bad payload in an
+ * async handler could take the entire academy offline. Log loudly and stay up —
+ * the handlers themselves still validate and catch (see mediaHandlers).
+ */
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection:', reason)
+})
+
+process.on('uncaughtException', (error) => {
+  console.error('[server] uncaught exception:', error)
 })
