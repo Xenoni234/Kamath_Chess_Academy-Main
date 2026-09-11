@@ -7,10 +7,26 @@ import { runInvoiceJob, type InvoiceJobData } from "@/lib/payments/runInvoiceJob
 import type { ProfileJobData } from "@/lib/second/types";
 import type { OpeningJobData } from "@/lib/opening/types";
 
-export const REPORT_QUEUE = "kca:reports";
-export const INVOICE_QUEUE = "kca:invoices";
-export const PROFILE_QUEUE = "kca:profiles";
-export const OPENING_QUEUE = "kca:openings";
+/**
+ * Queue names use `-`, not `:`.
+ *
+ * BullMQ builds its Redis keys as `bull:<queue>:<id>` and therefore **rejects a
+ * queue name containing a colon** — `Error: Queue name cannot contain :`. These
+ * were `kca:reports` and friends, which threw the moment a Worker was
+ * constructed and crash-looped the worker container.
+ *
+ * It survived undetected because the worker only starts when QUEUE_REDIS_URL is
+ * set; with it unset (every development machine here) `startWorkers()` returns
+ * early and no Queue is ever built. The first machine to set that variable was
+ * production.
+ *
+ * No migration is needed: nothing was ever enqueued under the old names, because
+ * nothing could construct them.
+ */
+export const REPORT_QUEUE = "kca-reports";
+export const INVOICE_QUEUE = "kca-invoices";
+export const PROFILE_QUEUE = "kca-profiles";
+export const OPENING_QUEUE = "kca-openings";
 
 // BullMQ ships its own nested ioredis; passing our top-level ioredis instance is
 // runtime-compatible but the two package copies have distinct types, so we cast
