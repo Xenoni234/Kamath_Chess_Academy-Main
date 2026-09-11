@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Markdown from "@/components/common/Markdown";
 import { useRouter } from "next/navigation";
 import {
   Activity,
@@ -552,10 +553,10 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
       {profile.summary && profile.status === "complete" && (
         <Section title="Briefing" icon={BookOpen}>
-          <div className="card space-y-3 border border-kca-border bg-kca-surface p-5 text-sm leading-relaxed text-kca-gray-200">
-            {profile.summary.split("\n").filter(Boolean).map((p, i) => (
-              <p key={i} className="whitespace-pre-wrap">{p}</p>
-            ))}
+          <div className="card border border-kca-border bg-kca-surface p-5">
+            {/* The briefing is model-authored markdown — headings and emphasis
+                render as literal text otherwise. */}
+            <Markdown text={profile.summary} />
           </div>
         </Section>
       )}

@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Chess } from "chess.js";
 import ChessBoard from "@/components/chess/ChessBoard";
+import Markdown from "@/components/common/Markdown";
 
 type Line = {
   moves: string[];
@@ -230,128 +231,215 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  const stepBtn =
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan hover:bg-kca-surface-3 disabled:cursor-not-allowed disabled:opacity-40";
+
+  // Moves grouped into numbered pairs so the list aligns as a real score sheet
+  // instead of wrapping as one undifferentiated run of tokens.
+  const moves = currentLine?.moves ?? [];
+  const pairs: { no: number; white?: string; black?: string; wi: number; bi: number }[] = [];
+  for (let i = 0; i < moves.length; i += 2) {
+    pairs.push({ no: i / 2 + 1, white: moves[i], black: moves[i + 1], wi: i + 1, bi: i + 2 });
+  }
+  const bookEnd = currentLine?.outOfBookAtPly;
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Link href="/dashboard/opening" className="text-sm text-kca-gray-400 hover:text-kca-cyan">
-            ← Opening Trainer
-          </Link>
-          <h1 className="section-heading">{rep.name}</h1>
-          <p className="text-sm text-kca-gray-400">
-            {rep.eco ? `${rep.eco} · ` : ""}You play {rep.colorToPlay} · {variations.length} variations
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-secondary" disabled={busy} onClick={toggleSave}>
-            {rep.saved ? "★ Saved" : "☆ Save"}
-          </button>
-          {rep.hasPdf && (
-            <a className="btn-secondary" href={`/api/opening/${id}/download`}>
-              Download PDF
-            </a>
-          )}
-          <button type="button" className="btn-secondary" disabled={busy} onClick={regenerate}>
-            Regenerate
-          </button>
+    <div className="mx-auto max-w-[1400px] px-4 py-8 lg:px-6">
+      {/* Header */}
+      <div className="mb-6">
+        <Link
+          href="/dashboard/opening"
+          className="inline-flex items-center gap-1 text-sm text-kca-gray-400 transition hover:text-kca-cyan"
+        >
+          ← Opening Trainer
+        </Link>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="section-heading truncate">{rep.name}</h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {rep.eco && (
+                <span className="rounded-md border border-kca-border bg-kca-surface-2 px-2 py-0.5 font-mono text-xs text-kca-cyan">
+                  {rep.eco}
+                </span>
+              )}
+              <span className="rounded-md border border-kca-border bg-kca-surface-2 px-2 py-0.5 text-xs text-kca-gray-100">
+                You play {rep.colorToPlay}
+              </span>
+              <span className="rounded-md border border-kca-border bg-kca-surface-2 px-2 py-0.5 text-xs text-kca-gray-100">
+                {variations.length} variations
+              </span>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button type="button" className="btn-secondary py-2 text-sm" disabled={busy} onClick={toggleSave}>
+              {rep.saved ? "★ Saved" : "☆ Save"}
+            </button>
+            {rep.hasPdf && (
+              <a className="btn-secondary py-2 text-sm" href={`/api/opening/${id}/download`}>
+                Download PDF
+              </a>
+            )}
+            <button type="button" className="btn-secondary py-2 text-sm" disabled={busy} onClick={regenerate}>
+              Regenerate
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Left: variation list + guide */}
-        <div className="order-2 lg:order-1">
-          <div className="card mb-6">
-            <h2 className="mb-3 text-lg font-semibold text-kca-white">Variations</h2>
-            <ul className="space-y-1">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+        {/* Left: variations + coach's guide */}
+        <div className="order-2 min-w-0 space-y-6 lg:order-1">
+          <section className="card">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-kca-gray-400">Variations</h2>
+            <ul className="-mx-1 space-y-0.5">
               {variations.map((v, i) => {
                 const isBest = rep.artifact?.bestLineIndex === i;
+                const active = selected === i;
                 return (
                   <li key={`${v.eco}-${v.name}-${i}`}>
                     <button
                       type="button"
                       onClick={() => selectVariation(i)}
-                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-                        selected === i ? "bg-kca-surface-3 text-kca-white" : "hover:bg-kca-surface-2 text-kca-gray-100"
+                      className={`grid w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border-l-2 px-2 py-2 text-left text-sm transition ${
+                        active
+                          ? "border-kca-cyan bg-kca-surface-3 text-kca-white"
+                          : "border-transparent text-kca-gray-100 hover:border-kca-border-bright hover:bg-kca-surface-2"
                       }`}
                     >
-                      <span className="flex items-center gap-2">
-                        {v.name}
-                        {isBest && <span className="rounded bg-kca-cyan px-1.5 py-0.5 text-[10px] font-semibold text-black">BEST</span>}
-                        {v.tag === "gambit" && <span className="rounded bg-kca-warning/20 px-1.5 py-0.5 text-[10px] text-kca-warning">gambit</span>}
-                        {v.tag === "trap" && <span className="rounded bg-kca-danger/20 px-1.5 py-0.5 text-[10px] text-kca-danger">trap</span>}
+                      <span className="font-mono text-xs text-kca-gray-500">{i + 1}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{v.name}</span>
+                        {isBest && (
+                          <span className="shrink-0 rounded bg-kca-cyan px-1.5 py-0.5 text-[10px] font-semibold text-black">
+                            BEST
+                          </span>
+                        )}
+                        {v.tag === "gambit" && (
+                          <span className="shrink-0 rounded bg-kca-warning/20 px-1.5 py-0.5 text-[10px] text-kca-warning">
+                            gambit
+                          </span>
+                        )}
+                        {v.tag === "trap" && (
+                          <span className="shrink-0 rounded bg-kca-danger/20 px-1.5 py-0.5 text-[10px] text-kca-danger">
+                            trap
+                          </span>
+                        )}
                       </span>
-                      <span className="ml-2 font-mono text-xs text-kca-gray-400">{v.eco}</span>
+                      <span className="font-mono text-xs tabular-nums text-kca-gray-500">{v.eco}</span>
                     </button>
                   </li>
                 );
               })}
             </ul>
-          </div>
+          </section>
 
-          <div className="card">
-            <h2 className="mb-3 text-lg font-semibold text-kca-white">Coach&apos;s guide</h2>
-            <div className="space-y-3 text-sm leading-relaxed text-kca-gray-100">
-              {(rep.guide ?? "").split(/\n\n+/).map((p, i) => (
-                <p key={i}>{p}</p>
-              ))}
-            </div>
-          </div>
+          <section className="card">
+            <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-kca-gray-400">Coach&apos;s guide</h2>
+            <Markdown text={rep.guide ?? ""} />
+          </section>
         </div>
 
-        {/* Right: board + move stepper + explanation */}
-        <div className="order-1 lg:order-2">
-          <div className="card">
-            <ChessBoard fen={fens[safePly]} orientation={orientation} onMove={() => {}} disabled lastMove={safePly > 0 ? ucis[safePly - 1] : undefined} />
-            <div className="mt-3 flex items-center gap-1.5">
-              <button type="button" aria-label="Start" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly === 0} onClick={() => setPly(0)}>
+        {/* Right: board, stepper, move list, explanation */}
+        <div className="order-1 lg:order-2 lg:sticky lg:top-6">
+          <div className="card space-y-3">
+            <ChessBoard
+              fen={fens[safePly]}
+              orientation={orientation}
+              onMove={() => {}}
+              disabled
+              lastMove={safePly > 0 ? ucis[safePly - 1] : undefined}
+            />
+
+            <div className="flex items-center gap-1.5">
+              <button type="button" aria-label="Start" className={stepBtn} disabled={safePly === 0} onClick={() => setPly(0)}>
                 ⏮
               </button>
-              <button type="button" aria-label="Back" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly === 0} onClick={() => setPly((p) => Math.max(0, p - 1))}>
+              <button
+                type="button"
+                aria-label="Previous move"
+                className={stepBtn}
+                disabled={safePly === 0}
+                onClick={() => setPly((p) => Math.max(0, p - 1))}
+              >
                 ◀
               </button>
-              <span className="flex-1 whitespace-nowrap text-center text-xs text-kca-gray-400">
-                {safePly === 0 ? "start" : `move ${Math.ceil(safePly / 2)}${safePly % 2 ? " (W)" : " (B)"}`}
+              <span className="flex-1 whitespace-nowrap text-center font-mono text-xs tabular-nums text-kca-gray-400">
+                {safePly === 0 ? "start" : `${Math.ceil(safePly / 2)}${safePly % 2 ? "." : "..."} ${moves[safePly - 1] ?? ""}`}
               </span>
-              <button type="button" aria-label="Forward" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly >= maxPly} onClick={() => setPly((p) => Math.min(maxPly, p + 1))}>
+              <button
+                type="button"
+                aria-label="Next move"
+                className={stepBtn}
+                disabled={safePly >= maxPly}
+                onClick={() => setPly((p) => Math.min(maxPly, p + 1))}
+              >
                 ▶
               </button>
-              <button type="button" aria-label="End" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kca-border bg-kca-surface-2 text-sm text-kca-cyan transition hover:border-kca-cyan disabled:cursor-not-allowed disabled:opacity-40" disabled={safePly >= maxPly} onClick={() => setPly(maxPly)}>
+              <button type="button" aria-label="End" className={stepBtn} disabled={safePly >= maxPly} onClick={() => setPly(maxPly)}>
                 ⏭
               </button>
             </div>
 
-            <div className="mt-3 font-mono text-xs leading-relaxed text-kca-gray-100">
-              {(currentLine?.moves ?? []).map((m, i) => (
-                <span
-                  key={i}
-                  className={`cursor-pointer rounded px-1 ${i + 1 === safePly ? "bg-kca-cyan/30 text-kca-white" : ""} ${
-                    currentLine?.outOfBookAtPly !== undefined && i >= currentLine.outOfBookAtPly ? "text-kca-gray-400" : ""
-                  }`}
-                  onClick={() => setPly(i + 1)}
-                >
-                  {i % 2 === 0 ? `${i / 2 + 1}.` : ""}
-                  {m}{" "}
-                </span>
-              ))}
+            {/* Score sheet — numbered pairs, so moves line up in columns. */}
+            <div className="max-h-44 overflow-y-auto rounded-lg border border-kca-border bg-kca-black p-2">
+              <div className="flex flex-wrap gap-x-1 gap-y-0.5 font-mono text-xs">
+                {pairs.map((p) => (
+                  <span key={p.no} className="inline-flex items-center gap-1">
+                    <span className="tabular-nums text-kca-gray-500">{p.no}.</span>
+                    {p.white && (
+                      <button
+                        type="button"
+                        onClick={() => setPly(p.wi)}
+                        className={`rounded px-1 transition ${
+                          safePly === p.wi ? "bg-kca-cyan text-black" : "text-kca-gray-100 hover:bg-kca-surface-3"
+                        } ${bookEnd !== undefined && p.wi > bookEnd ? "opacity-60" : ""}`}
+                      >
+                        {p.white}
+                      </button>
+                    )}
+                    {p.black && (
+                      <button
+                        type="button"
+                        onClick={() => setPly(p.bi)}
+                        className={`rounded px-1 transition ${
+                          safePly === p.bi ? "bg-kca-cyan text-black" : "text-kca-gray-100 hover:bg-kca-surface-3"
+                        } ${bookEnd !== undefined && p.bi > bookEnd ? "opacity-60" : ""}`}
+                      >
+                        {p.black}
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
             </div>
-            {currentLine?.outOfBookAtPly !== undefined && (
-              <p className="mt-2 text-[11px] italic text-kca-gray-400">
-                Popular human play to move {Math.ceil(currentLine.outOfBookAtPly / 2)}; the rest is the engine&apos;s
-                continuation.
+
+            {bookEnd !== undefined && (
+              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-kca-gray-500">
+                <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-kca-gray-600" />
+                Popular human play to move {Math.ceil(bookEnd / 2)}; the faded moves are the engine&apos;s continuation.
               </p>
             )}
 
             <button
               type="button"
-              className="btn-primary mt-4 w-full"
+              className="btn-primary w-full py-2.5"
               disabled={safePly < 1 || explaining}
               onClick={explainCurrent}
             >
-              {explaining ? "Explaining…" : safePly < 1 ? "Step forward, then explain a move" : `Explain ${currentLine?.moves[safePly - 1] ?? ""}`}
+              {explaining
+                ? "Explaining…"
+                : safePly < 1
+                  ? "Step forward to explain a move"
+                  : `Explain ${moves[safePly - 1] ?? ""}`}
             </button>
+
             {explanation && (
-              <div className="mt-3 rounded-lg border border-kca-border bg-kca-surface-2 p-3 text-sm leading-relaxed text-kca-gray-100">
-                {explanation}
+              <div className="rounded-lg border border-kca-cyan/30 bg-kca-cyan/5 p-3">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-kca-cyan">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-kca-cyan" />
+                  AI coach · engine-verified
+                </div>
+                <Markdown text={explanation} className="text-kca-gray-100" />
               </div>
             )}
           </div>

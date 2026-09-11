@@ -40,16 +40,31 @@ export const openingQuerySchema = z.object({
     .pipe(z.array(z.enum(LICHESS_RATING_BANDS)).min(1).max(9).optional()),
 });
 
+/** Email is lowercased here so the send and verify paths agree on the key. */
 export const otpSendSchema = z.object({
-  email: z.string().email(),
-  purpose: z.enum(["register", "login"]),
+  email: z.string().email().transform((v) => v.toLowerCase()),
+  purpose: z.enum(["register", "login", "reset"]),
 });
 
-export const otpVerifySchema = z.object({
-  email: z.string().email(),
-  otp: z.string().length(6),
-  purpose: z.enum(["register", "login"]),
+/** Step 1 of a password reset — ask for a code. Always answers 200 so the
+ *  endpoint cannot be used to discover which addresses have accounts. */
+export const forgotPasswordSchema = z.object({
+  email: z.string().email().transform((v) => v.toLowerCase()),
 });
+
+/** Step 2 — the code plus the new password, in one call. The OTP row is consumed
+ *  here, which is why there is no standalone verify endpoint. */
+export const resetPasswordSchema = z
+  .object({
+    email: z.string().email().transform((v) => v.toLowerCase()),
+    otp: z.string().length(6),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    confirmPassword: z.string(),
+  })
+  .refine((d) => d.password === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
 
 export const puzzleAttemptSchema = z.object({
   solved: z.boolean(),
@@ -64,3 +79,18 @@ export const reportGenerateSchema = z
   .refine((d) => d.lichessId || d.chesscomId, {
     message: "At least one platform ID is required",
   });
+
+/** Puzzle selection query. Coerced and bounded — these went straight into Prisma
+ *  unvalidated, so `?limit=-5` reversed the query and `?minRating=abc` sent NaN
+ *  into a `gte` filter. */
+export const puzzleQuerySchema = z.object({
+  theme: z.string().trim().min(1).max(40).optional(),
+  minRating: z.coerce.number().int().min(0).max(4000).default(800),
+  maxRating: z.coerce.number().int().min(0).max(4000).default(2000),
+  limit: z.coerce.number().int().min(1).max(25).default(1),
+});
+
+/** Rating lookup by time format. Replaces an `as TimeFormat` cast on a query param. */
+export const ratingQuerySchema = z.object({
+  format: z.enum(["BULLET", "BLITZ", "RAPID", "CLASSICAL"]),
+});

@@ -9,8 +9,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   if (!token) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const { id } = await context.params;
     const tournament = await db.tournament.findUnique({
       where: { id },
@@ -43,7 +51,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         })),
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[tournaments/[id]] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

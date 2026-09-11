@@ -13,6 +13,13 @@ export async function GET(request: NextRequest) {
   }
   try {
     verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     // Only these fields are read below, and the listing needs an upper bound —
     // it previously fetched whole rows for every tournament ever held.
     const tournaments = await db.tournament.findMany({
@@ -38,8 +45,9 @@ export async function GET(request: NextRequest) {
         playerCount: t._count.players,
       })),
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[tournaments] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }
 
@@ -48,8 +56,16 @@ export async function POST(request: NextRequest) {
   if (!token) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const denied = requireRole(payload, ["HR", "HEAD"]);
     if (denied) return denied;
 
@@ -65,7 +81,8 @@ export async function POST(request: NextRequest) {
       data: { title, description, type, startsAt: new Date(startsAt), status: "UPCOMING" },
     });
     return NextResponse.json({ success: true, tournament });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[tournaments] POST failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

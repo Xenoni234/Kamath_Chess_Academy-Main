@@ -104,7 +104,8 @@ export default function GameRoomClient({
         const res = await fetch(`/api/games/${gameId}`);
         // The route answers { success:false, message } on 401/404 — there is no
         // `game` key to read, and retrying an auth failure never recovers.
-        if (res.status === 401 || res.status === 403) break;
+        // 404 also means "not yours to read" (spectators): retrying never recovers.
+        if (res.status === 401 || res.status === 403 || res.status === 404) break;
         if (!res.ok) continue;
 
         const data = await res.json();

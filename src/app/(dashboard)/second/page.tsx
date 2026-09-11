@@ -182,12 +182,16 @@ export default function SecondPage() {
     if (previewTimer.current) clearTimeout(previewTimer.current);
     const text = pastedPgn.trim();
     if (!text) {
-      setPgnPreview(null);
-      setPreviewLoading(false);
+      // Clear on the same timer the preview arrives on, so the effect body never
+      // sets state synchronously.
+      previewTimer.current = setTimeout(() => {
+        setPgnPreview(null);
+        setPreviewLoading(false);
+      }, 0);
       return;
     }
-    setPreviewLoading(true);
     previewTimer.current = setTimeout(async () => {
+      setPreviewLoading(true);
       try {
         const res = await fetch("/api/second/pgn-preview", {
           method: "POST",

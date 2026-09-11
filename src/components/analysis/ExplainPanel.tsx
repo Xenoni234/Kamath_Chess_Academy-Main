@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import type { z } from "zod";
 import type { explainMoveSchema } from "@/lib/validations/phase2";
+import Markdown from "@/components/common/Markdown";
 
 // Derived from the Zod schema rather than imported from @/lib/claude, which
 // would pull the Anthropic SDK into the browser bundle.
@@ -151,10 +152,12 @@ export default function ExplainPanel({
       {error ? (
         <p className="text-sm text-kca-danger">{error}</p>
       ) : text ? (
-        <p className="text-sm text-kca-gray-100 leading-relaxed whitespace-pre-wrap">
-          {text}
+        <div className="text-sm leading-relaxed">
+          {/* The coach prompt asks for prose with **emphasis**; rendered raw it
+              would show literal asterisks. */}
+          <Markdown text={text} />
           {isStreaming && <span className="inline-block w-1.5 h-4 ml-0.5 bg-kca-cyan align-middle animate-pulse" />}
-        </p>
+        </div>
       ) : disabled ? (
         // Say *why* it is unavailable — landing on the start position with the
         // button greyed out and no reason reads as a broken feature.

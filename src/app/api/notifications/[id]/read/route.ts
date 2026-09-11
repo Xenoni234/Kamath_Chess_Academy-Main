@@ -8,8 +8,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const { id } = await context.params;
     // Scoped by userId — a user can only mark their own notifications read.
     await db.notification.updateMany({
@@ -17,7 +25,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       data: { readAt: new Date() },
     });
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[notifications/[id]/read] POST failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

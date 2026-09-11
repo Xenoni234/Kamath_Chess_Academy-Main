@@ -56,8 +56,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const now = new Date();
     const upcoming = { endsAt: { gte: now } };
 
@@ -104,8 +112,9 @@ export async function GET(request: NextRequest) {
       take: CLASS_PAGE_SIZE,
     });
     return NextResponse.json({ success: true, classes: shape(rows) });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[classes] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }
 
@@ -115,9 +124,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
-    const denied = requireRole(payload, ["HR", "HEAD"]);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
+    // Coaches may schedule sessions for batches they actually run; the ownership
+    // check happens below, once we know which batch. Anyone else is refused here.
+    const denied = requireRole(payload, ["HR", "HEAD", "COACH"]);
     if (denied) return denied;
 
     const parsed = createClassSchema.safeParse(await request.json());
@@ -132,6 +151,25 @@ export async function POST(request: NextRequest) {
     const batch = await db.batch.findUnique({ where: { id: batchId }, select: { id: true, coachId: true } });
     if (!batch) {
       return NextResponse.json({ success: false, message: "Batch not found" }, { status: 404 });
+    }
+
+    // A coach may only schedule into their own batch, and may not assign the
+    // class to somebody else — otherwise "coach can create classes" becomes
+    // "any coach can put a session in any batch, under any colleague's name".
+    if (payload.role === "COACH") {
+      const ownProfile = await db.coachProfile.findUnique({
+        where: { userId: payload.userId },
+        select: { id: true },
+      });
+      if (!ownProfile || batch.coachId !== ownProfile.id) {
+        return NextResponse.json({ success: false, message: "Batch not found" }, { status: 404 });
+      }
+      if (coachUserId && coachUserId !== payload.userId) {
+        return NextResponse.json(
+          { success: false, message: "You can only schedule classes for yourself." },
+          { status: 403 },
+        );
+      }
     }
 
     const coachId = coachUserId ? await coachProfileIdForUser(coachUserId) : batch.coachId;
@@ -180,7 +218,8 @@ export async function POST(request: NextRequest) {
     ]);
 
     return NextResponse.json({ success: true, class: created });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[classes] POST failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }

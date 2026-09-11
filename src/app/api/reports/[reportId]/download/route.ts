@@ -22,8 +22,16 @@ export async function GET(
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
 
+  let payload: ReturnType<typeof verifyAccessToken>;
   try {
-    const payload = verifyAccessToken(token);
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  // A failure below here is a server fault, not an auth failure. Returning 401
+  // for it used to log every user out on a single database blip, silently.
+  try {
     const { reportId } = await context.params;
 
     const report = await db.gameReport.findUnique({ where: { id: reportId } });
@@ -55,7 +63,8 @@ export async function GET(
         "Cache-Control": "private, no-store",
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    console.error("[reports/[reportId]/download] GET failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }
