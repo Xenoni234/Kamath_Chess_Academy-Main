@@ -83,6 +83,49 @@ async function main() {
   check("HR sees any student", await canViewStudent({ userId: hr.id, role: "HR" }, otherChild.id));
   check("HEAD sees any student", await canViewStudent({ userId: head.id, role: "HEAD" }, otherChild.id));
 
+  console.log("\nRoute gating — prefix collisions");
+  // "/dashboard/student-detail/<id>" used to match the "/dashboard/student" rule
+  // through a raw `startsWith`, so the STUDENT-only gate fired and every coach,
+  // parent and head who clicked a student was bounced to their own dashboard.
+  // The page was never the problem; the router refused to let anyone reach it.
+  const gated: Record<string, string[]> = {
+    "/dashboard/student": ["STUDENT"],
+    "/dashboard/student-detail": ["COACH", "HR", "HEAD", "PARENT"],
+    "/dashboard/parent": ["PARENT"],
+    "/dashboard/coach": ["COACH"],
+    "/dashboard/hr": ["HR", "HEAD"],
+    "/dashboard/head": ["HEAD"],
+    "/dashboard/admin": ["HR", "HEAD"],
+    "/dashboard/schedule": ["HR", "HEAD"],
+    "/dashboard/children": ["PARENT", "HR", "HEAD"],
+    "/dashboard/roster": ["COACH", "HR", "HEAD"],
+  };
+  /** Mirrors src/proxy.ts: whole segments, longest match wins. */
+  const matchRoute = (pathname: string) =>
+    Object.keys(gated)
+      .filter((route) => pathname === route || pathname.startsWith(`${route}/`))
+      .sort((a, b) => b.length - a.length)[0];
+
+  check("a student detail page matches its OWN rule, not /dashboard/student",
+    matchRoute("/dashboard/student-detail/abc123") === "/dashboard/student-detail",
+    String(matchRoute("/dashboard/student-detail/abc123")));
+  check("the student dashboard still matches its own rule",
+    matchRoute("/dashboard/student") === "/dashboard/student");
+  check("a nested admin path matches /dashboard/admin",
+    matchRoute("/dashboard/admin/audit") === "/dashboard/admin");
+  check("an unrelated path matching no rule is left alone",
+    matchRoute("/dashboard/puzzles") === undefined, String(matchRoute("/dashboard/puzzles")));
+  check("a path that merely SHARES a prefix is not captured",
+    matchRoute("/dashboard/students") === undefined, String(matchRoute("/dashboard/students")));
+
+  // The rule file and the real proxy must not drift apart.
+  const proxySource = (await import("node:fs")).readFileSync("src/proxy.ts", "utf8");
+  for (const route of Object.keys(gated)) {
+    check(`proxy.ts still gates ${route}`, proxySource.includes(`"${route}"`));
+  }
+  check("proxy.ts matches on segments, not a raw prefix",
+    proxySource.includes("pathname === route || pathname.startsWith(`${route}/`)"));
+
   await cleanup();
   console.log(failures === 0 ? "\n✅ ALL PASS (test accounts removed)" : `\n❌ ${failures} CHECK(S) FAILED (test accounts removed)`);
   process.exit(failures === 0 ? 0 : 1);

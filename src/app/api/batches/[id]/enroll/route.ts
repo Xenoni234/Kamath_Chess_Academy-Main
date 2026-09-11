@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
-import { requireRole } from "@/lib/authz";
+import { canManageBatch } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { writeAuditLog } from "@/lib/audit";
 import { enrollSchema } from "@/lib/validations/phase3";
 import { createNotification } from "@/lib/notify";
 
@@ -22,9 +23,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   // A failure below here is a server fault, not an auth failure. Returning 401
   // for it used to log every user out on a single database blip, silently.
   try {
-    const denied = requireRole(payload, ["HR", "HEAD"]);
-    if (denied) return denied;
-
     const { id } = await context.params;
     const parsed = enrollSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -34,25 +32,48 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       );
     }
 
-    const { studentUserId } = parsed.data;
+    const { studentUserId, username } = parsed.data;
+    // A coach enrols students into batches they run; staff into any batch. 404
+    // rather than 403 for someone else's batch, so ids cannot be probed.
     const batch = await db.batch.findUnique({ where: { id }, select: { id: true, name: true } });
-    if (!batch) {
+    if (!batch || !(await canManageBatch(payload, id))) {
       return NextResponse.json({ success: false, message: "Batch not found" }, { status: 404 });
     }
 
+    const student = studentUserId
+      ? await db.user.findUnique({
+          where: { id: studentUserId },
+          select: { id: true, username: true, role: true, isActive: true },
+        })
+      : await db.user.findFirst({
+          where: { username: { equals: username!, mode: "insensitive" } },
+          select: { id: true, username: true, role: true, isActive: true },
+        });
+    if (!student || student.role !== "STUDENT" || !student.isActive) {
+      // One message for "no such person" and "not a student", so this cannot be
+      // used to find out who has an account.
+      return NextResponse.json({ success: false, message: "No active student with that name." }, { status: 404 });
+    }
+
     // Idempotent: skip if already enrolled.
-    const existing = await db.classEnrollment.findFirst({ where: { batchId: id, userId: studentUserId } });
+    const existing = await db.classEnrollment.findFirst({ where: { batchId: id, userId: student.id } });
     if (!existing) {
-      await db.classEnrollment.create({ data: { batchId: id, userId: studentUserId } });
+      await db.classEnrollment.create({ data: { batchId: id, userId: student.id } });
       await createNotification({
-        userId: studentUserId,
+        userId: student.id,
         type: "SYSTEM",
         title: "Enrolled in a batch",
         body: `You've been enrolled in "${batch.name}".`,
       });
+      await writeAuditLog({
+        action: "batch.enroll",
+        userId: payload.userId,
+        metadata: { batchId: id, studentId: student.id },
+        request,
+      });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, username: student.username, alreadyEnrolled: Boolean(existing) });
   } catch (error) {
     console.error("[batches/[id]/enroll] POST failed:", error);
     return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });

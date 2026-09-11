@@ -23,7 +23,9 @@ type Room = {
 export default function ClassRoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [room, setRoom] = useState<Room | null>(null);
-  const [isCoach, setIsCoach] = useState(false);
+  // Broader than isCoach: HR and HEAD run the academy and may need to start a
+  // class, add a student or mark attendance when a coach is unavailable.
+  const [canManage, setCanManage] = useState(false);
   const [sfuEnabled, setSfuEnabled] = useState(false);
   const [viewerName, setViewerName] = useState("student");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -41,7 +43,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
       return;
     }
     setRoom(data.room);
-    setIsCoach(data.isCoach);
+    setCanManage(Boolean(data.canManage));
     setSfuEnabled(Boolean(data.sfuEnabled));
     setViewerName(data.viewerName ?? "student");
     setMessages(data.messages ?? []);
@@ -63,17 +65,24 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
     const onRoster = (r: RosterEntry[]) => setRoster(r);
     const onError = (e: { message: string }) => setError(e.message);
 
+    // The coach ended it. Reload so the video tears down and the page shows the
+    // class as finished, rather than leaving everyone in a call for a lesson that
+    // is over.
+    const onEnded = () => void load();
+
     socket.on("class:message", onMessage);
     socket.on("class:roster", onRoster);
     socket.on("class:error", onError);
+    socket.on("class:ended", onEnded);
 
     return () => {
       socket.emit("class:leave", { classId: id });
       socket.off("class:message", onMessage);
       socket.off("class:roster", onRoster);
       socket.off("class:error", onError);
+      socket.off("class:ended", onEnded);
     };
-  }, [room, id]);
+  }, [room, id, load]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -128,7 +137,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
             </span>
           </p>
         </div>
-        {isCoach && (
+        {canManage && (
           <div className="flex gap-2">
             {room.status !== "ONGOING" ? (
               <button type="button" className="btn-primary" disabled={busy} onClick={() => toggleLive("start")}>
@@ -152,6 +161,11 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
               <a href={room.meetingUrl} target="_blank" rel="noopener noreferrer" className="btn-primary">
                 Open meeting ↗
               </a>
+            </div>
+          ) : room.status === "COMPLETED" ? (
+            <div className="flex min-h-[24rem] flex-col items-center justify-center gap-2 p-8 text-center">
+              <p className="text-kca-gray-100">This class has ended.</p>
+              <p className="text-sm text-kca-gray-400">The chat below stays available.</p>
             </div>
           ) : sfuEnabled ? (
             <SfuStage classId={room.id} />
@@ -178,7 +192,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
             </ul>
           </div>
 
-          {isCoach && <AttendancePanel classId={id} presentUserIds={roster.map((r) => r.userId)} />}
+          {canManage && <AttendancePanel classId={id} presentUserIds={roster.map((r) => r.userId)} />}
 
           <div className="card flex min-h-[20rem] flex-col">
             <h2 className="mb-2 text-sm font-semibold text-kca-white">Class chat</h2>
@@ -254,6 +268,17 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const seededRef = useRef(false);
+  // Adding a student from inside the room. The alternative is leaving a live
+  // class for the Scheduling page, which is not something a coach mid-lesson will
+  // do — so a student who turns up unenrolled simply never gets marked.
+  const [adding, setAdding] = useState(false);
+  const [addable, setAddable] = useState<{ id: string; username: string }[]>([]);
+  const [pick, setPick] = useState("");
+  // The dropdown only offers students this person already sees — for a coach that
+  // is their own roster, which never contains the walk-in they are trying to add.
+  // Typing an exact username covers that without letting anyone browse the
+  // academy's student list.
+  const [typed, setTyped] = useState("");
   // Presence is read through a ref so it can seed the first load without making
   // `load` re-run every time someone joins or leaves. Declared before the loading
   // effect below so it is populated first on mount — effects run in source order.
@@ -294,6 +319,51 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  const loadAddable = useCallback(async () => {
+    try {
+      const res = await fetch("/api/students");
+      const data = await res.json();
+      if (!res.ok || !data.success) return;
+      // /api/students is already scoped to what this caller may see — a coach's
+      // roster, or everyone for staff. Filter out whoever is already on the
+      // attendance list so the dropdown only offers real additions.
+      const already = new Set(rows.map((r) => r.id));
+      setAddable((data.students ?? []).filter((s: { id: string }) => !already.has(s.id)));
+    } catch {
+      /* non-fatal — the button just offers nothing */
+    }
+  }, [rows]);
+
+  async function addStudent() {
+    const byName = typed.trim();
+    if (!pick && !byName) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/classes/${encodeURIComponent(classId)}/enroll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // An explicit pick wins; otherwise the typed name is resolved server-side.
+        body: JSON.stringify(pick ? { studentUserId: pick } : { username: byName }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "Could not add that student.");
+        return;
+      }
+      setAdding(false);
+      setPick("");
+      setTyped("");
+      // Refetch rather than patch local state: the roster is the server's answer
+      // and a batch-enrolled student may already have been there.
+      await load();
+    } catch {
+      setError("Could not add that student.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function save() {
     const entries = Object.entries(marks).map(([userId, status]) => ({ userId, status }));
@@ -364,6 +434,74 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
           ))}
         </ul>
       )}
+
+      <div className="mb-3 border-t border-kca-border pt-3">
+        {adding ? (
+          <div className="space-y-2">
+            <select
+              className="input-field w-full py-1.5 text-sm"
+              value={pick}
+              onChange={(e) => setPick(e.target.value)}
+            >
+              <option value="">Choose a student…</option>
+              {addable.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.username}
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary flex-1 py-1.5 text-xs"
+                disabled={(!pick && !typed.trim()) || saving}
+                onClick={addStudent}
+              >
+                Add to this class
+              </button>
+              <button
+                type="button"
+                className="btn-secondary px-3 py-1.5 text-xs"
+                onClick={() => {
+                  setAdding(false);
+                  setPick("");
+                  setTyped("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="h-px flex-1 bg-kca-border" />
+              <span className="text-[10px] uppercase tracking-wider text-kca-gray-500">or by username</span>
+              <span className="h-px flex-1 bg-kca-border" />
+            </div>
+            <input
+              className="input-field w-full py-1.5 text-sm"
+              placeholder="Exact username"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void addStudent()}
+            />
+            {addable.length === 0 && (
+              <p className="text-xs text-kca-gray-500">
+                Nobody on your roster is missing from this class — type a username to add anyone else.
+              </p>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="text-xs text-kca-cyan hover:underline"
+            onClick={() => {
+              setAdding(true);
+              void loadAddable();
+            }}
+          >
+            + Add a student to this class
+          </button>
+        )}
+      </div>
 
       {rows.length > 0 && (
         <div className="flex items-center justify-between gap-2">

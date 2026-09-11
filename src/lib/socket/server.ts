@@ -59,6 +59,10 @@ export function setupSocketServer(io: Server) {
 
     socket.data.userId = payload.userId;
     socket.data.username = payload.username;
+    // Needed by the class handlers: academy staff may join any class room, and
+    // without the role here `canAccess` could only ever see the coach and the
+    // enrolled students.
+    socket.data.role = payload.role;
 
     // Personal room for direct server→user emits (notifications, etc.).
     socket.join(`user:${payload.userId}`);

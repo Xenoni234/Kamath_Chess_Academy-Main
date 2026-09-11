@@ -14,6 +14,7 @@ import {
   GraduationCap,
   History,
   Home,
+  KeyRound,
   IndianRupee,
   Inbox,
   LogOut,
@@ -73,22 +74,27 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: `/dashboard/${roleLower}`, label: "Overview", icon: Home },
 
     // --- Training (students; coaches keep it to demonstrate and prepare) ---
-    { href: "/dashboard/play", label: "Play vs Human", icon: Swords, roles: ["STUDENT", "COACH"] },
-    { href: "/dashboard/play-engine", label: "Play Engine", icon: Bot, roles: ["STUDENT", "COACH"] },
-    { href: "/dashboard/analysis", label: "Analysis", icon: Activity, roles: ["STUDENT", "COACH"] },
-    { href: "/dashboard/puzzles", label: "Puzzles", icon: Puzzle, roles: ["STUDENT", "COACH"] },
-    { href: "/dashboard/openings", label: "Openings", icon: Map, roles: ["STUDENT", "COACH"] },
-    { href: "/dashboard/opening", label: "Opening Trainer", icon: GraduationCap, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/play", label: "Play vs Human", icon: Swords, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/play-engine", label: "Play Engine", icon: Bot, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/analysis", label: "Analysis", icon: Activity, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/puzzles", label: "Puzzles", icon: Puzzle, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/openings", label: "Openings", icon: Map, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/opening", label: "Opening Trainer", icon: GraduationCap, roles: ["STUDENT", "COACH", "HEAD"] },
     { href: "/dashboard/second", label: "Second AI", icon: Brain, roles: ["STUDENT", "COACH", "HEAD"] },
-    { href: "/dashboard/games", label: "Games", icon: Trophy, roles: ["STUDENT", "COACH"] },
-    { href: "/dashboard/reports", label: "Reports", icon: FileText, roles: ["STUDENT", "COACH"] },
+    { href: "/dashboard/games", label: "Games", icon: Trophy, roles: ["STUDENT", "COACH", "HEAD"] },
+    { href: "/dashboard/reports", label: "Reports", icon: FileText, roles: ["STUDENT", "COACH", "HEAD"] },
     { href: "/dashboard/tournaments", label: "Tournaments", icon: Medal, roles: ["STUDENT", "COACH", "HR", "HEAD"] },
 
     // --- Parent ---
     { href: "/dashboard/children", label: "My Children", icon: Users, roles: ["PARENT"] },
 
-    // --- Coach ---
-    { href: "/dashboard/roster", label: "My Students", icon: Users, roles: ["COACH"] },
+    // --- Coach, and the head, who also coaches ---
+    //
+    // The head runs the academy AND teaches, so every training tool a coach has
+    // is listed for them too. The pages themselves already permitted it — only
+    // this navigation hid them, which made the head's own product invisible to
+    // the head.
+    { href: "/dashboard/roster", label: "Students", icon: Users, roles: ["COACH", "HR", "HEAD"] },
 
     // --- Everyone who attends or runs a class ---
     { href: "/dashboard/classes", label: "Classes", icon: CalendarDays },
@@ -97,10 +103,11 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: "/dashboard/fees", label: "Fees", icon: IndianRupee, roles: ["STUDENT", "PARENT"] },
 
     // --- Academy administration ---
-    { href: "/dashboard/schedule", label: "Schedule", icon: CalendarPlus, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/schedule", label: "Schedule", icon: CalendarPlus, roles: ["COACH", "HR", "HEAD"] },
     { href: "/dashboard/admin/users", label: "People", icon: UserCog, roles: ["HR", "HEAD"] },
-    { href: "/dashboard/admin/payments", label: "Fees", icon: IndianRupee, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/payments", label: "Fees", icon: IndianRupee, roles: ["HEAD"] },
     { href: "/dashboard/admin/contact", label: "Enquiries", icon: Inbox, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/invite-codes", label: "Invite codes", icon: KeyRound, roles: ["HEAD"] },
     { href: "/dashboard/admin/audit", label: "Audit log", icon: History, roles: ["HEAD"] },
   ];
 
@@ -118,7 +125,14 @@ export default function DashboardSidebar({ username, role }: { username: string;
   // Below `md` the layout stacks vertically and this sits in normal flow.
   return (
     <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 select-none md:h-screen md:min-h-0 md:w-72 md:overflow-hidden">
-      <Link href="/" className="mb-8 flex items-center gap-3 rounded-xl border border-kca-border bg-kca-black p-3">
+      {/* Home for a signed-in person is their own dashboard, not the marketing
+          site. Clicking the logo used to drop them onto the public homepage,
+          which reads as having been signed out. The public navbar's logo still
+          points at "/" — that is home when you are not signed in. */}
+      <Link
+        href={`/dashboard/${roleLower}`}
+        className="mb-8 flex items-center gap-3 rounded-xl border border-kca-border bg-kca-black p-3"
+      >
         <Image src="/kca-logo.png" alt="KCA" width={44} height={44} className="h-11 w-11 object-contain" />
         <div>
           <div className="font-display text-sm font-bold text-kca-white">Kamath Chess Academy</div>
