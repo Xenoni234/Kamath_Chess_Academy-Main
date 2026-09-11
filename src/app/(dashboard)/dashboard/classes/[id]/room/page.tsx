@@ -16,6 +16,7 @@ type Room = {
   endsAt: string;
   meetingUrl: string | null;
   liveStartedAt: string | null;
+  videoRoomKey: string | null;
   coachName: string | null;
 };
 
@@ -47,6 +48,8 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   }, [id]);
 
   useEffect(() => {
+    // Async: state is set after an await, not synchronously in the effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
@@ -110,10 +113,6 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   }
   if (!room) return <div className="mx-auto max-w-3xl px-4 py-10 text-kca-gray-400">Loading room…</div>;
 
-  const jitsiSrc = `https://meet.jit.si/KCA-${room.id}#userInfo.displayName=%22${encodeURIComponent(
-    viewerName,
-  )}%22&config.prejoinPageEnabled=false`;
-
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -157,22 +156,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
           ) : sfuEnabled ? (
             <SfuStage classId={room.id} />
           ) : (
-            <div className="flex flex-col">
-              <iframe
-                title="Class video"
-                src={jitsiSrc}
-                className="h-[70vh] min-h-[24rem] w-full border-0"
-                allow="camera; microphone; display-capture; fullscreen; speaker-selection; autoplay"
-              />
-              <a
-                href={`https://meet.jit.si/KCA-${room.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="border-t border-kca-border px-3 py-2 text-center text-xs text-kca-gray-400 hover:text-kca-cyan"
-              >
-                Video not loading? Open it in a new tab ↗
-              </a>
-            </div>
+            <JitsiEmbed roomKey={room.videoRoomKey} displayName={viewerName} />
           )}
         </div>
 
@@ -193,6 +177,8 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
               )}
             </ul>
           </div>
+
+          {isCoach && <AttendancePanel classId={id} presentUserIds={roster.map((r) => r.userId)} />}
 
           <div className="card flex min-h-[20rem] flex-col">
             <h2 className="mb-2 text-sm font-semibold text-kca-white">Class chat</h2>
@@ -225,6 +211,264 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+type AttendanceRow = {
+  id: string;
+  username: string;
+  status: AttendanceStatus | null;
+  note: string | null;
+  markedAt: string | null;
+};
+
+const STATUSES: { value: AttendanceStatus; label: string; tone: string }[] = [
+  { value: "PRESENT", label: "P", tone: "bg-kca-success text-black" },
+  { value: "ABSENT", label: "A", tone: "bg-kca-danger text-white" },
+  { value: "LATE", label: "L", tone: "bg-kca-warning text-black" },
+  { value: "EXCUSED", label: "E", tone: "bg-kca-surface-3 text-kca-white" },
+];
+
+/**
+ * Coach-only attendance marking.
+ *
+ * The roster comes from `GET /api/attendance`, which is enrollment-derived, and
+ * NOT from the `class:roster` socket event that feeds the "In room" card above.
+ * That event is connected-only presence: a student who never joined has no
+ * socket and never appears in it, so sourcing the roster there would make the
+ * absent students — the entire reason attendance exists — impossible to mark.
+ *
+ * Presence is still used, but only as a hint: on first load a student who is
+ * currently connected and has no existing mark is pre-selected PRESENT. That
+ * seeding happens once (`seededRef`). If it re-ran whenever presence changed, a
+ * coach who deliberately marked someone ABSENT would see it flip back the moment
+ * that student reconnected.
+ */
+function AttendancePanel({ classId, presentUserIds }: { classId: string; presentUserIds: string[] }) {
+  const [rows, setRows] = useState<AttendanceRow[]>([]);
+  const [marks, setMarks] = useState<Record<string, AttendanceStatus>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const seededRef = useRef(false);
+  // Presence is read through a ref so it can seed the first load without making
+  // `load` re-run every time someone joins or leaves. Declared before the loading
+  // effect below so it is populated first on mount — effects run in source order.
+  const presentRef = useRef(presentUserIds);
+  useEffect(() => {
+    presentRef.current = presentUserIds;
+  }, [presentUserIds]);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/attendance?classId=${encodeURIComponent(classId)}`);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "Could not load the roster.");
+        return;
+      }
+      const students: AttendanceRow[] = data.students ?? [];
+      setRows(students);
+      setMarks((prev) => {
+        const next = { ...prev };
+        for (const s of students) {
+          // An existing mark always wins over presence and over local state.
+          if (s.status) next[s.id] = s.status;
+          else if (!seededRef.current && presentRef.current.includes(s.id)) next[s.id] = "PRESENT";
+        }
+        return next;
+      });
+      seededRef.current = true;
+    } catch {
+      setError("Could not load the roster.");
+    } finally {
+      setLoading(false);
+    }
+  }, [classId]);
+
+  useEffect(() => {
+    // Async: state is set after an await, not synchronously in the effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
+
+  async function save() {
+    const entries = Object.entries(marks).map(([userId, status]) => ({ userId, status }));
+    if (entries.length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId, entries }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "Could not save attendance.");
+        return;
+      }
+      setSavedAt(new Date().toLocaleTimeString("en-IN"));
+      await load();
+    } catch {
+      setError("Could not save attendance.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const markedCount = Object.keys(marks).length;
+
+  return (
+    <div className="card">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-kca-white">Attendance</h2>
+        <span className="text-xs text-kca-gray-400">
+          {loading ? "loading…" : `${markedCount}/${rows.length} marked`}
+        </span>
+      </div>
+
+      {error && <p className="mb-2 text-xs text-kca-danger">{error}</p>}
+
+      {!loading && rows.length === 0 ? (
+        <p className="text-sm text-kca-gray-500">No students are enrolled in this class yet.</p>
+      ) : (
+        <ul className="mb-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+          {rows.map((r) => (
+            <li key={r.id} className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm text-kca-gray-100" title={r.username}>
+                {r.username}
+                {presentUserIds.includes(r.id) && (
+                  <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-kca-success align-middle" />
+                )}
+              </span>
+              <span className="flex shrink-0 gap-1">
+                {STATUSES.map((s) => (
+                  <button
+                    key={s.value}
+                    type="button"
+                    title={s.value}
+                    onClick={() => setMarks((m) => ({ ...m, [r.id]: s.value }))}
+                    className={`h-6 w-6 rounded text-xs font-semibold transition ${
+                      marks[r.id] === s.value ? s.tone : "bg-kca-surface-2 text-kca-gray-400 hover:text-kca-white"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {rows.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-kca-gray-500">{savedAt ? `Saved ${savedAt}` : "P / A / L / E"}</span>
+          <button
+            type="button"
+            className="btn-primary px-3 py-1.5 text-xs"
+            disabled={saving || markedCount === 0}
+            onClick={save}
+          >
+            {saving ? "Saving…" : "Save attendance"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The embedded Jitsi call.
+ *
+ * Two things here are security fixes, not style choices.
+ *
+ * **The room name is a secret from the server, not the class id.** It used to be
+ * `KCA-<class cuid>`, so anyone who learned or guessed a class id could walk into
+ * a live class of minors with no KCA account. The server now mints a random key
+ * behind the authorisation check and rotates it whenever the coach starts the
+ * class, so a forwarded link dies with the session.
+ *
+ * **The display name is passed through the IFrame API, not the URL.** It was in
+ * the `#userInfo.displayName=` fragment, which puts a child's name into browser
+ * history, the DOM `src` attribute, and anything that reads either. `userInfo` in
+ * the options object never leaves JavaScript.
+ *
+ * Be clear about what this is: a secret room name on public `meet.jit.si` is
+ * obscurity, not authentication. It closes enumeration and stale-link reuse. Real
+ * authentication is 8x8 JaaS with a signed JWT, or the self-hosted SFU — both
+ * tracked separately.
+ */
+function JitsiEmbed({ roomKey, displayName }: { roomKey: string | null; displayName: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!roomKey || !containerRef.current) return;
+    const parentNode = containerRef.current;
+    let api: { dispose: () => void } | null = null;
+    let cancelled = false;
+
+    const SCRIPT_ID = "jitsi-external-api";
+    function start() {
+      const Ctor = (window as unknown as { JitsiMeetExternalAPI?: new (domain: string, options: unknown) => { dispose: () => void } })
+        .JitsiMeetExternalAPI;
+      if (cancelled || !Ctor) return;
+      api = new Ctor("meet.jit.si", {
+        roomName: `KCA-${roomKey}`,
+        parentNode,
+        width: "100%",
+        height: "100%",
+        // Never in the URL — see the note above.
+        userInfo: { displayName },
+        configOverwrite: { prejoinPageEnabled: false },
+      });
+    }
+
+    const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
+    if (existing) {
+      if ((window as unknown as { JitsiMeetExternalAPI?: unknown }).JitsiMeetExternalAPI) start();
+      else existing.addEventListener("load", start, { once: true });
+    } else {
+      const script = document.createElement("script");
+      script.id = SCRIPT_ID;
+      script.src = "https://meet.jit.si/external_api.js";
+      script.async = true;
+      script.onload = start;
+      script.onerror = () => setFailed(true);
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      cancelled = true;
+      api?.dispose();
+    };
+  }, [roomKey, displayName]);
+
+  if (!roomKey) {
+    return (
+      <div className="flex min-h-[24rem] items-center justify-center p-8 text-center text-sm text-kca-gray-400">
+        Preparing the video room…
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col">
+      <div ref={containerRef} className="h-[70vh] min-h-[24rem] w-full" />
+      {failed ? (
+        <p className="border-t border-kca-border px-3 py-2 text-center text-xs text-kca-danger">
+          Video failed to load. You can still use the chat.
+        </p>
+      ) : (
+        <p className="border-t border-kca-border px-3 py-2 text-center text-xs text-kca-gray-400">
+          This room is private to your class. Please don&rsquo;t share the link.
+        </p>
+      )}
     </div>
   );
 }

@@ -18,17 +18,21 @@
  */
 import * as mediasoup from "mediasoup";
 import type { types } from "mediasoup";
+// Explicit .ts extension: this module is loaded by server.mjs through Node's
+// own loader, not Next's bundler, so extensionless relative imports do not
+// resolve. Same reason mediaHandlers.ts imports "./classHandlers.ts".
+import { mediaEnabledFromEnv } from "./enabled.ts";
 
 const MIN_PORT = Number(process.env.MEDIASOUP_MIN_PORT ?? 40000);
 const MAX_PORT = Number(process.env.MEDIASOUP_MAX_PORT ?? 40100);
 const LISTEN_IP = process.env.MEDIASOUP_LISTEN_IP || "127.0.0.1";
 const ANNOUNCED_IP = process.env.MEDIASOUP_ANNOUNCED_IP || undefined;
 
-/** SFU on when explicitly enabled, or by default in dev; off in prod unless set. */
+/** SFU on when explicitly enabled, or by default in dev; off in prod unless set.
+ *  Re-exported from lib/media/enabled.ts so the Next route and this module cannot
+ *  drift — see that file for why the logic does not live here. */
 export function mediaEnabled(): boolean {
-  if (process.env.MEDIASOUP_ENABLED === "false") return false;
-  if (process.env.MEDIASOUP_ENABLED === "true") return true;
-  return process.env.NODE_ENV !== "production";
+  return mediaEnabledFromEnv();
 }
 
 const MEDIA_CODECS: types.RtpCodecCapability[] = [
