@@ -58,22 +58,22 @@ async function main() {
   await cleanup();
 
   console.log("1. Registration records all seven consent fields");
-  await fetch(`${BASE}/api/auth/otp/send`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: EMAIL, purpose: "register" }),
-  });
-  const row = await db.otpVerification.findFirst({
-    where: { email: EMAIL, purpose: "register" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!row) {
-    console.log("  FAIL  could not issue an OTP — is the dev server running?");
-    fail++;
-    return;
-  }
+  // Seed the code directly rather than through /api/auth/otp/send.
+  //
+  // That endpoint is rate limited, and — while the project is on Resend's test
+  // sender — it now correctly REFUSES any address but the account owner's and
+  // deletes the unusable row. This test is about consent columns, not delivery;
+  // verifyEmailFailure owns that.
   const code = "424242";
-  await db.otpVerification.update({ where: { id: row.id }, data: { otpHash: await bcrypt.hash(code, 10) } });
+  await db.otpVerification.create({
+    data: {
+      email: EMAIL.toLowerCase(),
+      otpHash: await bcrypt.hash(code, 10),
+      purpose: "register",
+      expiresAt: new Date(Date.now() + 600000),
+      attempts: 0,
+    },
+  });
 
   const res = await fetch(`${BASE}/api/auth/register`, {
     method: "POST",

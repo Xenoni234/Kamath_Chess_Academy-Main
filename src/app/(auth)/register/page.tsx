@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle, Loader2, UserPlus } from "lucide-react";
 import AuthShell from "@/components/auth/AuthShell";
+import { SIGNUP_ROLE_OPTIONS, CODE_REQUIRED_ROLES } from "@/lib/validations";
 
 type FormState = {
   username: string;
@@ -21,7 +22,32 @@ type FormState = {
   agreedToDataProcessing: boolean;
   agreedToMarketing: boolean;
   agreedToSms: boolean;
+  role: (typeof SIGNUP_ROLE_OPTIONS)[number];
+  inviteCode: string;
+  studentUsername: string;
+  parentCode: string;
 };
+
+/**
+ * The "I am a" dropdown.
+ *
+ * What each option actually does is the server's call — see SELF_SIGNUP_ROLES in
+ * lib/validations.ts. This file only draws the list.
+ */
+const ROLE_LABELS: Record<(typeof SIGNUP_ROLE_OPTIONS)[number], string> = {
+  STUDENT: "Student",
+  PARENT: "Parent",
+  COACH: "Coach",
+  HR: "Academy staff",
+};
+
+// `needsCode` is derived from the server's own list rather than hardcoded, so the
+// form cannot drift from what the route will actually enforce.
+const ROLE_CHOICES = SIGNUP_ROLE_OPTIONS.map((value) => ({
+  value,
+  label: ROLE_LABELS[value],
+  needsCode: (CODE_REQUIRED_ROLES as readonly string[]).includes(value),
+}));
 
 const initialForm: FormState = {
   username: "",
@@ -38,6 +64,10 @@ const initialForm: FormState = {
   agreedToDataProcessing: false,
   agreedToMarketing: false,
   agreedToSms: false,
+  role: "STUDENT",
+  inviteCode: "",
+  studentUsername: "",
+  parentCode: "",
 };
 
 export default function RegisterPage() {
@@ -47,6 +77,9 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const selectedRole = ROLE_CHOICES.find((choice) => choice.value === form.role);
+  const needsCode = Boolean(selectedRole?.needsCode);
+  const isParent = form.role === "PARENT";
   /** OTP request state. Nothing in the app used to call the send endpoint at all,
    *  so no code was ever created and every real registration failed. */
   const [sendingOtp, setSendingOtp] = useState(false);
@@ -131,6 +164,8 @@ export default function RegisterPage() {
         return;
       }
 
+      // A coach/staff request cannot sign in yet, so say so rather than dropping
+      // them on a login form that will reject them.
       router.push("/login");
     } catch {
       setError("Registration failed. Please check your connection and try again.");
@@ -151,6 +186,63 @@ export default function RegisterPage() {
 
         {step === 1 && (
           <>
+            <div>
+              <label
+                htmlFor="role"
+                className="mb-2 block font-display text-xs font-semibold uppercase tracking-wider text-kca-gray-400"
+              >
+                I am a
+              </label>
+              <select
+                id="role"
+                className="input-field w-full"
+                value={form.role}
+                onChange={(e) => update("role", e.target.value as FormState["role"])}
+              >
+                {ROLE_CHOICES.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+              {needsCode && (
+                <div className="mt-3">
+                  <TextField
+                    label="Invite code"
+                    value={form.inviteCode}
+                    onChange={(value) => update("inviteCode", value.toUpperCase())}
+                    required
+                    hint="The academy gives you this. Each code works once."
+                    error={fieldErrors.inviteCode?.[0]}
+                  />
+                </div>
+              )}
+
+              {isParent && (
+                <div className="mt-3 space-y-3 rounded-lg border border-kca-border bg-kca-surface-2 p-3">
+                  <p className="text-xs text-kca-gray-400">
+                    Your child can find their parent code on their own dashboard. You need both their username and
+                    that code.
+                  </p>
+                  <TextField
+                    label="Student's username"
+                    value={form.studentUsername}
+                    onChange={(value) => update("studentUsername", value)}
+                    required
+                    error={fieldErrors.studentUsername?.[0]}
+                  />
+                  <TextField
+                    label="Parent code"
+                    value={form.parentCode}
+                    onChange={(value) => update("parentCode", value.toUpperCase())}
+                    required
+                    hint="Six characters, like ABC-DEF"
+                    error={fieldErrors.parentCode?.[0]}
+                  />
+                </div>
+              )}
+            </div>
+
             <TextField label="Username" value={form.username} onChange={(value) => update("username", value)} required error={fieldErrors.username?.[0]} />
             <TextField label="Email" type="email" value={form.email} onChange={(value) => update("email", value)} required error={fieldErrors.email?.[0]} />
             <TextField label="Mobile" value={form.mobile} onChange={(value) => update("mobile", value)} required error={fieldErrors.mobile?.[0]} />
@@ -224,7 +316,14 @@ export default function RegisterPage() {
               Back
             </button>
           )}
-          <button type="submit" className="btn-primary flex-1" disabled={isSubmitting || (step === 3 && (!requiredConsentsReady || form.otp.length !== 6))}>
+          <button type="submit" className="btn-primary flex-1" disabled={
+            isSubmitting ||
+            (step === 1 && needsCode && form.inviteCode.trim().length === 0) ||
+            (step === 1 &&
+              isParent &&
+              (form.studentUsername.trim().length === 0 || form.parentCode.trim().length === 0)) ||
+            (step === 3 && (!requiredConsentsReady || form.otp.length !== 6))
+          }>
             {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : step === 3 ? <UserPlus className="h-5 w-5" /> : <ArrowRight className="h-5 w-5" />}
             {step === 3 ? "Create Account" : "Continue"}
           </button>

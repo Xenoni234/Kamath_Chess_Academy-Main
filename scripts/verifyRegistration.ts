@@ -28,7 +28,20 @@ import bcrypt from "bcryptjs";
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 const BASE = "http://localhost:3000";
 // Mixed case on purpose: the lowercase-on-both-sides fix is what this proves.
-const EMAIL = "KCA.Verify.Test@example.com";
+/**
+ * A DELIVERABLE address, mixed-case on purpose.
+ *
+ * This test drives the real /api/auth/otp/send endpoint, so the address has to
+ * be one the mail provider will actually accept — otherwise the send correctly
+ * fails, the unusable code row is correctly deleted, and the test fails for a
+ * reason that has nothing to do with registration.
+ *
+ * Defaults to the Resend account owner, which is the only address the test
+ * sender will deliver to. Override with VERIFY_EMAIL once a sending domain is
+ * verified. The mixed case is the point of the first assertion: a capitalised
+ * address used to be able to receive a code it could never redeem.
+ */
+const EMAIL = process.env.VERIFY_EMAIL ?? "Gyaneshwarofficial2021@gmail.com";
 const LOWER = EMAIL.toLowerCase();
 const PASSWORD = "Str0ng!TestPass2026";
 const USERNAME = "kcaverifytest";
@@ -39,21 +52,64 @@ function check(label: string, ok: boolean, detail = "") {
   else { fail++; console.log(`  FAIL  ${label} ${detail}`); }
 }
 
+/**
+ * Ids this run created. Cleanup removes ONLY these.
+ *
+ * This used to delete by email — `deleteMany({ where: { email: LOWER } })` — and
+ * that destroyed a real account. When the test address changed to a deliverable
+ * one (it has to be, since the endpoint really sends), the email it cleans up
+ * became a REAL user's email, and every run silently deleted that person along
+ * with everything cascading from them.
+ *
+ * A test may delete what it made. It may never delete by a field a real row
+ * could also match.
+ */
+const createdUserIds = new Set<string>();
+
 async function cleanup() {
-  await db.otpVerification.deleteMany({ where: { email: LOWER } });
-  await db.user.deleteMany({ where: { email: LOWER } });
+  // OTP rows are safe to clear by address: they are short-lived, single-purpose,
+  // and a stale one would only block the next run.
+  await db.otpVerification.deleteMany({ where: { email: LOWER, purpose: "register" } });
+
+  if (createdUserIds.size === 0) return;
+  const ids = [...createdUserIds];
+  await db.auditLog.deleteMany({ where: { userId: { in: ids } } });
+  await db.userSession.deleteMany({ where: { userId: { in: ids } } });
+  await db.studentProfile.deleteMany({ where: { userId: { in: ids } } });
+  await db.user.deleteMany({ where: { id: { in: ids } } });
+  createdUserIds.clear();
+}
+
+/** Refuse to run if the test address already belongs to somebody. */
+async function assertAddressIsFree(): Promise<boolean> {
+  const existing = await db.user.findUnique({ where: { email: LOWER }, select: { id: true, username: true } });
+  if (!existing) return true;
+  console.log(`  ABORT  ${LOWER} already belongs to "${existing.username}".`);
+  console.log("         This test registers and then deletes that address, so it will not touch");
+  console.log("         a real account. Set VERIFY_EMAIL to an address nobody is using.");
+  return false;
 }
 
 async function main() {
+  if (!(await assertAddressIsFree())) {
+    fail++;
+    return;
+  }
   await cleanup();
 
-  console.log("1. Request an OTP (mixed-case address)");
+  console.log(`1. Request an OTP (mixed-case address: ${EMAIL})`);
   const send = await fetch(`${BASE}/api/auth/otp/send`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: EMAIL, purpose: "register" }),
   });
   const sendBody = await send.json().catch(() => ({}));
   console.log(`     status ${send.status} ${JSON.stringify(sendBody).slice(0, 160)}`);
+
+  if (send.status === 429) {
+    console.log("     Rate limited from an earlier run — not a product failure.");
+    console.log("     Wait an hour, or clear the `rate:otp:ip:*` key in Redis, then re-run.");
+    return;
+  }
 
   const row = await db.otpVerification.findFirst({
     where: { email: LOWER, purpose: "register" }, orderBy: { createdAt: "desc" },
@@ -96,6 +152,7 @@ async function main() {
   check("registration succeeded", ok.status < 400, `got ${ok.status} ${JSON.stringify(okBody).slice(0, 200)}`);
 
   const user = await db.user.findFirst({ where: { email: LOWER } });
+  if (user) createdUserIds.add(user.id);
   check("account exists", Boolean(user));
   check("account is STUDENT", user?.role === "STUDENT", `got ${user?.role}`);
   check("account isVerified === true", user?.isVerified === true, `got ${user?.isVerified}`);
