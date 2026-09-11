@@ -87,11 +87,10 @@ sensible floor**; 8 GB gives headroom.
 ## 4. One-time prep (before touching the server)
 
 1. **Push all code to GitHub** (`github.com/Xenoni234/Kamath_Chess_Academy-Main`) so the VPS can clone it.
-2. **(Recommended) migrate the database to Mumbai first.** The DB is currently in Tokyo
-   (`ap-northeast-1`); users are in India. `scripts/migrate-region.sh` does a verified dump/restore
-   to a new **`ap-south-1`** Supabase project. This cuts ~130 ms off *every* request. Do it now so the
-   `DATABASE_URL`/`DIRECT_URL` you deploy with are already the fast ones. (The 495k-row puzzle bank
-   comes across in the dump — no re-import.)
+2. ~~Migrate the database to Mumbai.~~ **Done — 11 Sept 2026.** The DB now lives in
+   `ap-south-1`; connect+query went from 989 ms to 79 ms. Deploy with the Mumbai
+   `DATABASE_URL`/`DIRECT_URL` (the Tokyo ones are kept commented out at the top of
+   `.env.local` as the rollback). Nothing to do here.
 3. Make sure you have all **secrets** ready (see [§6](#6-environment-variables)).
 
 ---
@@ -389,26 +388,35 @@ cd /opt/kca && git checkout <last-good-commit> && docker compose up -d --build
 
 ## 11. Launch checklist → 14 Sept
 
-**Now → ~3 weeks out (this week):**
+> **Rewritten 11 Sept.** Three days out, not three weeks. The ordering below is by
+> *blocking risk*, not by comfort — the first deploy has never been done, and the
+> email domain is the one thing that makes the site unusable if it is not ready.
+
+**11 Sept — the two that have lead time, before anything else:**
+- [ ] **Verify the Resend sending domain** (DNS at Hostinger). Registration calls
+      `verifyOtpCode` with **no bypass**, so until this propagates, nobody but
+      `gyaneshwarofficial2021@gmail.com` can sign up. DNS can take hours — start here.
+- [ ] **Rotate the Supabase password** and update `DATABASE_URL`/`DIRECT_URL`.
 - [ ] Push all code to GitHub.
-- [ ] Run the **Supabase Mumbai migration** and update `DATABASE_URL`/`DIRECT_URL`.
-- [ ] Rent the VPS; install Docker.
+- [ ] Rent the VPS; install Docker; deploy; point `@` and `www` at the IP.
+- [ ] Set `QUEUE_REDIS_URL` and run the worker, or jobs stick in `processing`.
 
-**~2 weeks out:**
-- [ ] Add the four deploy files; fill `.env.production`.
-- [ ] `docker compose up -d --build` on a **test subdomain** (e.g. `staging.kamathchessacademy.com` → same IP) and run all §9 smoke tests.
-- [ ] Fix anything the smoke tests surface.
+**12 Sept — test on the real thing, not localhost:**
+- [ ] All §9 smoke tests against `https://kamathchessacademy.com`.
+- [ ] **Two browsers on two devices in one class room** — camera, screen share, End class.
+      This is the largest never-verified area in the product.
+- [ ] Register a brand-new account from a phone on mobile data, with a real address.
+- [ ] `curl -sI` the domain and confirm COOP/COEP survived the proxy (Stockfish needs them).
 
-**~1 week out:**
-- [ ] Lower DNS TTL to 300.
-- [ ] Seed real content: coaches/HR accounts, batches, a first tournament, any puzzles/classes for opening week.
-- [ ] Confirm Resend sender domain is verified (so OTP/emails don't spam-folder).
+**13 Sept — lock it down:**
+- [ ] Delete the demo accounts (`democoach`, `demostaff`, `demostudent`, `demoparent`)
+      and change the head account's password — it has been shared in a chat transcript.
+- [ ] Edit the refund policy; it still carries a DRAFT banner on a public page.
+- [ ] Have one coach and one parent who are not you use the site for an hour.
 
-**Launch day (14 Sept):**
-- [ ] Point `@` and `www` A-records at the VPS IP.
+**14 Sept — announce:**
+- [ ] Only once a stranger can register and receive the OTP. That is the single gate.
 - [ ] Watch `docker compose logs -f` for the first live users.
-- [ ] Re-run the §9 smoke tests on the production domain.
-- [ ] Announce. 🎉
 
 ---
 
