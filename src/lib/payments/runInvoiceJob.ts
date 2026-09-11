@@ -26,6 +26,7 @@ import { db } from "@/lib/db";
 import { reserveInvoiceNumber } from "./invoiceNumber";
 import { renderInvoicePdf } from "./invoicePdf";
 import { createNotification } from "@/lib/notify";
+import { sendEmail } from "@/lib/email";
 
 export type InvoiceJobData = { paymentId: string };
 
@@ -100,17 +101,16 @@ export async function runInvoiceJob(data: InvoiceJobData): Promise<void> {
     await fs.writeFile(pdfPath, pdf);
     await db.invoice.update({ where: { id: invoiceId }, data: { pdfUrl: pdfPath } });
 
-    const emailFrom = process.env.EMAIL_FROM;
-    if (emailFrom) {
-      const { Resend } = await import("resend");
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      await resend.emails.send({
-        from: emailFrom,
-        to: payment.user.email,
-        subject: `Invoice ${number} — Kamath Chess Academy`,
-        html: `<p>Your invoice ${number} is attached.</p>`,
-        attachments: [{ filename: `${number}.pdf`, content: pdf }],
-      });
+    const emailed = await sendEmail({
+      to: payment.user.email,
+      subject: `Invoice ${number} — Kamath Chess Academy`,
+      html: `<p>Your invoice ${number} is attached.</p>`,
+      attachments: [{ filename: `${number}.pdf`, content: pdf }],
+    });
+    // Not fatal — the invoice row and its PDF exist either way, and the student
+    // can download it. But it must be visible in the log rather than assumed.
+    if (!emailed.sent) {
+      console.warn(`[invoice] ${number} generated but not emailed: ${emailed.error}`);
     }
   } catch (error) {
     console.error(`[invoice] PDF/email failed for ${invoiceId} (row kept):`, error);

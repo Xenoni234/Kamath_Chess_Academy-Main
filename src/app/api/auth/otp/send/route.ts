@@ -69,6 +69,15 @@ export async function POST(request: NextRequest) {
 
     const issued = await issueOtpCode({ email, purpose });
     if (!issued.success) {
+      // Give the IP allowance back. The per-email limit is derived from stored
+      // rows and `issueOtpCode` already deletes the unsendable one, so that side
+      // corrects itself; this counter does not.
+      //
+      // It matters because the common causes of a failed send — an unverified
+      // sending domain, a provider outage — are not the user's doing. Charging
+      // them for it locks them out for an hour from retrying something that was
+      // never going to work until someone else fixed it.
+      await redis.decr(ipKey).catch(() => {});
       return NextResponse.json({ success: false, message: issued.error }, { status: 500 });
     }
 

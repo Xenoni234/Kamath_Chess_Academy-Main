@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 import { db } from "@/lib/db";
+import { sendEmail } from "@/lib/email";
 import { redis } from "@/lib/redis";
 import { contactSchema } from "@/lib/validations";
 
@@ -64,30 +64,28 @@ export async function POST(request: Request) {
 
     // Then notify the academy. A mail failure must not lose the enquiry, so this
     // runs after the write and is caught.
-    const emailFrom = process.env.EMAIL_FROM;
-    const notifyTo = process.env.CONTACT_NOTIFY_EMAIL || emailFrom;
-    if (emailFrom && notifyTo) {
-      try {
-        const resend = new Resend(process.env.RESEND_API_KEY);
-        await resend.emails.send({
-          from: emailFrom,
-          to: notifyTo,
-          replyTo: email,
-          subject: `New enquiry from ${name}`,
-          html: `<div style="font-family:system-ui,sans-serif">
+    const notifyTo = process.env.CONTACT_NOTIFY_EMAIL || process.env.EMAIL_FROM;
+    if (notifyTo) {
+      const notified = await sendEmail({
+        to: notifyTo,
+        replyTo: email,
+        subject: `New enquiry from ${name}`,
+        html: `<div style="font-family:system-ui,sans-serif">
   <h3 style="margin:0 0 8px">New website enquiry</h3>
   <p style="margin:0 0 4px"><strong>Name:</strong> ${escapeHtml(name)}</p>
   <p style="margin:0 0 4px"><strong>Email:</strong> ${escapeHtml(email)}</p>
   ${mobile ? `<p style="margin:0 0 4px"><strong>Mobile:</strong> ${escapeHtml(mobile)}</p>` : ""}
-  <p style="margin:12px 0 4px"><strong>Message:</strong></p>
-  <p style="white-space:pre-wrap;margin:0">${escapeHtml(message)}</p>
+  <p style="margin:12px 0 0;white-space:pre-wrap">${escapeHtml(message)}</p>
 </div>`,
-        });
-      } catch (mailError) {
-        console.error("[contact] notification email failed (enquiry was saved):", mailError);
+      });
+      // The enquiry is already saved and readable in the staff inbox, so a failed
+      // notification is a delay, not a lost lead. It still has to be logged —
+      // silently dropping it is how the OTP bug went unnoticed for a day.
+      if (!notified.sent) {
+        console.warn(`[contact] enquiry ${saved.id} saved but the notification failed: ${notified.error}`);
       }
     } else {
-      console.warn("[contact] EMAIL_FROM not set — enquiry saved but nobody was notified");
+      console.warn(`[contact] enquiry ${saved.id} saved but nobody was notified — set CONTACT_NOTIFY_EMAIL`);
     }
 
     console.log(`[contact] enquiry ${saved.id} received`);
