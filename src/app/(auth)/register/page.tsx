@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle, Loader2, UserPlus } from "lucide-react";
 import AuthShell from "@/components/auth/AuthShell";
 
@@ -47,6 +47,12 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /** OTP request state. Nothing in the app used to call the send endpoint at all,
+   *  so no code was ever created and every real registration failed. */
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpNotice, setOtpNotice] = useState("");
+  const [resendIn, setResendIn] = useState(0);
 
   const requiredConsentsReady = useMemo(
     () => form.agreedToTerms && form.agreedToAge && form.agreedToDataProcessing,
@@ -55,6 +61,42 @@ export default function RegisterPage() {
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  // Cooldown so the button cannot be mashed into the 3-per-hour server limit.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendIn]);
+
+  async function sendOtp() {
+    const email = form.email.trim().toLowerCase();
+    if (!email) {
+      setOtpNotice("Enter your email in step 1 first.");
+      return;
+    }
+    setSendingOtp(true);
+    setOtpNotice("");
+    try {
+      const response = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, purpose: "register" }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        setOtpNotice(data.message ?? "Could not send the code. Try again.");
+        return;
+      }
+      setOtpSent(true);
+      setResendIn(60);
+      setOtpNotice(`Code sent to ${email}. It expires in 10 minutes.`);
+    } catch {
+      setOtpNotice("Could not send the code. Check your connection.");
+    } finally {
+      setSendingOtp(false);
+    }
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -127,12 +169,32 @@ export default function RegisterPage() {
 
         {step === 3 && (
           <>
-            {process.env.NODE_ENV === "development" && (
-              <div className="rounded-lg border border-kca-warning/20 bg-kca-warning/5 p-3 text-sm text-kca-warning">
-                Dev mode: use 000000 as OTP
+            <div className="rounded-lg border border-kca-border bg-kca-surface-2 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-kca-white">Verify your email</p>
+                  <p className="truncate text-xs text-kca-gray-400">{form.email || "Add your email in step 1"}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void sendOtp()}
+                  disabled={sendingOtp || resendIn > 0 || !form.email}
+                  className="btn-secondary shrink-0 px-3 py-1.5 text-xs disabled:opacity-50"
+                >
+                  {sendingOtp ? "Sending…" : resendIn > 0 ? `Resend in ${resendIn}s` : otpSent ? "Resend code" : "Send code"}
+                </button>
               </div>
-            )}
-            <TextField label="OTP" inputMode="numeric" maxLength={6} value={form.otp} onChange={(value) => update("otp", value.replace(/\D/g, "").slice(0, 6))} required />
+              {otpNotice && <p className="mt-2 text-xs text-kca-gray-100">{otpNotice}</p>}
+            </div>
+            <TextField
+              label="6-digit code"
+              inputMode="numeric"
+              maxLength={6}
+              value={form.otp}
+              onChange={(value) => update("otp", value.replace(/\D/g, "").slice(0, 6))}
+              required
+              hint={otpSent ? "Check your inbox — and your spam folder." : "Press Send code above to receive it."}
+            />
             <Checkbox checked={form.agreedToTerms} onChange={(checked) => update("agreedToTerms", checked)}>
               I agree to the{" "}
               <Link href="/terms" target="_blank" className="text-kca-cyan hover:underline">
@@ -151,9 +213,6 @@ export default function RegisterPage() {
             </Checkbox>
             <Checkbox checked={form.agreedToMarketing} onChange={(checked) => update("agreedToMarketing", checked)}>
               I agree to receive promotional emails, offers, and newsletters from KCA
-            </Checkbox>
-            <Checkbox checked={form.agreedToSms} onChange={(checked) => update("agreedToSms", checked)}>
-              I agree to receive SMS notifications for class reminders and important updates
             </Checkbox>
           </>
         )}
