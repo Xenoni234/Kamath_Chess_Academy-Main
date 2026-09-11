@@ -11,6 +11,7 @@
  * `require("stockfish")`: that package is a devDependency, so it is absent
  * from a production install, whereas `public/` always ships with the app.
  */
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { pristineFetch } from "@/lib/pristineFetch";
@@ -330,8 +331,28 @@ function searchPositionWithPv(
  * from running many single-threaded engines instead, which scales close to
  * linearly. Leaving 2 cores free keeps the web server responsive while a
  * dossier generates.
+ *
+ * **Derived from the machine, not hardcoded.** This was a flat 8, which is right
+ * on the 10-core laptop it was measured on and wrong on a small VPS: eight
+ * single-threaded engines on two vCPUs is a 4x oversubscription, so every
+ * search slows down *and* the Node event loop that serves the site is starved
+ * while a dossier runs. The failure mode is nasty because it is not an error —
+ * the site just goes unresponsive for two minutes whenever someone profiles an
+ * opponent.
+ *
+ * `ENGINE_CONCURRENCY` overrides it when a host needs a specific number.
  */
-export const ENGINE_CONCURRENCY = 8;
+function defaultEngineConcurrency(): number {
+  const fromEnv = Number(process.env.ENGINE_CONCURRENCY);
+  if (Number.isInteger(fromEnv) && fromEnv > 0) return fromEnv;
+  // `availableParallelism` respects cgroup limits, which `cpus().length` does
+  // not — inside a container the latter reports the host's cores, which is how
+  // a 2-vCPU box ends up believing it has 16.
+  const cores = os.availableParallelism?.() ?? os.cpus().length;
+  return Math.max(1, Math.min(8, cores - 2));
+}
+
+export const ENGINE_CONCURRENCY = defaultEngineConcurrency();
 
 /**
  * Run `worker` over `items` across a pool of single-threaded engines.
