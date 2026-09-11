@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import DashboardSidebar from "@/components/dashboard/DashboardSidebar";
 import SessionKeepAlive from "@/components/dashboard/SessionKeepAlive";
+import { RoleProvider } from "@/components/auth/RoleContext";
 import { verifyAccessToken } from "@/lib/auth";
 import type { TokenPayload } from "@/lib/auth";
 
@@ -34,12 +35,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
       Below `md` the shell stays in normal flow and the window scrolls as before.
     */
-    <div className="min-h-screen bg-kca-black text-kca-white md:flex md:h-screen md:overflow-hidden">
-      <SessionKeepAlive />
-      <DashboardSidebar username={payload.username} role={payload.role} />
-      <main className="min-w-0 flex-1 px-6 py-8 md:h-screen md:overflow-y-auto md:px-8 lg:px-10">
-        {children}
-      </main>
-    </div>
+    // The layout has already verified the token, so the identity is handed down
+    // through context instead of every client page fetching /api/auth/me and
+    // flashing its role-dependent controls in late.
+    <RoleProvider user={{ userId: payload.userId, username: payload.username, role: payload.role }}>
+      <div className="min-h-screen bg-kca-black text-kca-white md:flex md:h-screen md:overflow-hidden">
+        <SessionKeepAlive />
+        <DashboardSidebar username={payload.username} role={payload.role} />
+        <main className="min-w-0 flex-1 px-6 py-8 md:h-screen md:overflow-y-auto md:px-8 lg:px-10">
+          {children}
+        </main>
+      </div>
+    </RoleProvider>
   );
 }

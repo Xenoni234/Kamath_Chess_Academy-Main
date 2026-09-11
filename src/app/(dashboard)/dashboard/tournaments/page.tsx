@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Trophy, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useHasRole } from "@/components/auth/RoleContext";
 
 type Tournament = {
   id: string;
@@ -24,7 +25,6 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function TournamentsPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -39,19 +39,18 @@ export default function TournamentsPage() {
   }
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/tournaments").then((r) => r.json()),
-      fetch("/api/auth/me").then((r) => r.json()),
-    ])
-      .then(([t, me]) => {
+    fetch("/api/tournaments")
+      .then((r) => r.json())
+      .then((t) => {
         if (t.success) setTournaments(t.tournaments);
-        if (me.success) setRole(me.user.role);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  const isManager = role === "HR" || role === "HEAD";
+  // From context, not a fetch: the server already knew this, so the manager
+  // controls render correctly on the first paint instead of popping in late.
+  const isManager = useHasRole("HR", "HEAD");
 
   async function create(e: React.FormEvent) {
     e.preventDefault();

@@ -18,6 +18,7 @@ import EvalBar from "@/components/chess/EvalBar";
 import EngineLines from "@/components/analysis/EngineLines";
 import AnalysisMoveList from "@/components/analysis/AnalysisMoveList";
 import ExplainPanel, { type ExplainParams } from "@/components/analysis/ExplainPanel";
+import AnnotationPanel from "@/components/analysis/AnnotationPanel";
 import ImportPanel from "@/components/analysis/ImportPanel";
 import { useStockfish, type AnalyzeResult } from "@/hooks/useStockfish";
 import {
@@ -82,6 +83,8 @@ export default function AnalysisBoardClient() {
   const isScanning = scanProgress !== null;
   const currentNode = currentPly > 0 ? nodes[currentPly - 1] : null;
   const currentAnalysis = analyses.find((entry) => entry.ply === currentPly) ?? null;
+  // Plies that carry a coach note, so the move list can mark them.
+  const [annotatedPlies, setAnnotatedPlies] = useState<Map<number, string>>(new Map());
 
   /**
    * The most recent explain-depth search, kept so "Explain move" does not have
@@ -610,6 +613,20 @@ export default function AnalysisBoardClient() {
             </div>
           )}
 
+          <AnnotationPanel
+            // Deliberately NOT keyed to the position, unlike ExplainPanel below:
+            // remounting here would discard a half-written note the moment the
+            // coach stepped to the next move.
+            gameId={gameId}
+            ply={currentPly}
+            moveLabel={
+              currentNode
+                ? `${Math.ceil(currentNode.ply / 2)}${currentNode.mover === "w" ? "." : "..."}${currentNode.san}`
+                : undefined
+            }
+            onAnnotationsChange={setAnnotatedPlies}
+          />
+
           <ExplainPanel
             // Remounting on position change is what clears the previous explanation.
             key={`${currentFen}:${currentPly}`}
@@ -628,6 +645,7 @@ export default function AnalysisBoardClient() {
             currentPly={currentPly}
             onSelectPly={goToPly}
             classifications={classifications}
+            annotations={annotatedPlies}
           />
 
           <ImportPanel
