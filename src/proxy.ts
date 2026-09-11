@@ -12,9 +12,17 @@ const roleRoutes: Record<string, string[]> = {
   "/dashboard/hr": ["HR", "HEAD"],
   "/dashboard/head": ["HEAD"],
   "/dashboard/admin": ["HR", "HEAD"],
-  "/dashboard/schedule": ["HR", "HEAD"],
+  // Narrower than the rest of /dashboard/admin. Fees are the head's alone, and
+  // the segment matcher takes the LONGEST match, so this is not shadowed by the
+  // line above.
+  "/dashboard/admin/payments": ["HEAD"],
+  "/dashboard/schedule": ["COACH", "HR", "HEAD"],
   "/dashboard/children": ["PARENT", "HR", "HEAD"],
   "/dashboard/roster": ["COACH", "HR", "HEAD"],
+  // Who may OPEN a student's page. Whether they may see THAT student is decided
+  // by `canViewStudent` in /api/students/[id]/overview — this only keeps the
+  // shell away from roles it could never be useful to.
+  "/dashboard/student-detail": ["COACH", "HR", "HEAD", "PARENT"],
 };
 
 /**
@@ -97,7 +105,18 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginWithReturn(request, pathname));
   }
 
-  const matchedRoute = Object.keys(roleRoutes).find((route) => pathname.startsWith(route));
+  // Match on whole path SEGMENTS, not a raw string prefix.
+  //
+  // `pathname.startsWith(route)` made "/dashboard/student-detail/abc" match the
+  // "/dashboard/student" rule, so the STUDENT-only gate fired and every coach,
+  // parent and head who clicked a student was bounced to their own dashboard.
+  // The page was fine; the router never let them reach it.
+  //
+  // Longest match wins, so a more specific rule is never shadowed by a shorter
+  // one that happens to share a prefix.
+  const matchedRoute = Object.keys(roleRoutes)
+    .filter((route) => pathname === route || pathname.startsWith(`${route}/`))
+    .sort((a, b) => b.length - a.length)[0];
 
   if (matchedRoute && !roleRoutes[matchedRoute].includes(payload.role)) {
     const home = HOME_FOR_ROLE[payload.role] ?? "/login";

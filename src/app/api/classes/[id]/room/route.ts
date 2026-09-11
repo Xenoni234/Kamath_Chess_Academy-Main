@@ -16,8 +16,17 @@ function newRoomKey(): string {
   return crypto.randomBytes(16).toString("base64url");
 }
 
-/** Coach of the class, or a student enrolled in it / its batch. */
-async function access(classId: string, userId: string) {
+/**
+ * Who this caller is in this room.
+ *
+ * `isCoach` is strictly the assigned coach. `canManage` is broader — it also
+ * covers HR and HEAD, who run the academy and may need to start a class, add a
+ * student or mark attendance when a coach is unavailable. The attendance and
+ * enrolment APIs already used the wider rule, so gating the room's controls on
+ * `isCoach` alone meant the head could not press buttons the server would have
+ * happily accepted.
+ */
+async function access(classId: string, userId: string, role: string) {
   const cls = await db.class.findUnique({
     where: { id: classId },
     select: {
@@ -34,14 +43,16 @@ async function access(classId: string, userId: string) {
       coach: { select: { userId: true, user: { select: { username: true } } } },
     },
   });
-  if (!cls) return { cls: null as null, isCoach: false, allowed: false };
+  if (!cls) return { cls: null as null, isCoach: false, canManage: false, allowed: false };
   const isCoach = cls.coach?.userId === userId;
-  if (isCoach) return { cls, isCoach: true, allowed: true };
+  const isStaff = role === "HR" || role === "HEAD";
+  const canManage = isCoach || isStaff;
+  if (canManage) return { cls, isCoach, canManage, allowed: true };
   const enrolled = await db.classEnrollment.findFirst({
     where: { userId, OR: [{ classId }, ...(cls.batchId ? [{ batchId: cls.batchId }] : [])] },
     select: { id: true },
   });
-  return { cls, isCoach: false, allowed: Boolean(enrolled) };
+  return { cls, isCoach: false, canManage: false, allowed: Boolean(enrolled) };
 }
 
 /** Room context: class details, recent chat history, and the caller's role. */
@@ -56,7 +67,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { id } = await params;
-  const { cls, isCoach, allowed } = await access(id, payload.userId);
+  const { cls, isCoach, canManage, allowed } = await access(id, payload.userId, payload.role);
   if (!cls) return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
   // 404, not 403 — don't reveal a class exists to someone not in it.
   if (!allowed) return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
@@ -99,6 +110,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       coachName: cls.coach?.user.username ?? null,
     },
     isCoach,
+    canManage,
     viewerName: payload.username,
     sfuEnabled: mediaEnabledFromEnv(),
     messages: messages.map((m) => ({
@@ -125,9 +137,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const { id } = await params;
-  const { cls, isCoach } = await access(id, payload.userId);
+  const { cls, canManage } = await access(id, payload.userId, payload.role);
   if (!cls) return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
-  if (!isCoach) return NextResponse.json({ success: false, message: "Only the class coach can do that" }, { status: 403 });
+  if (!canManage) {
+    return NextResponse.json(
+      { success: false, message: "Only the class coach or academy staff can do that" },
+      { status: 403 },
+    );
+  }
 
   let body: unknown;
   try {
@@ -168,6 +185,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   await db.class.update({ where: { id }, data: { status: "COMPLETED" } });
+
+  // Actually end it. Without this, "End class" only changed a status column —
+  // the video kept running and everyone stayed connected, so the lesson was over
+  // in the database and nowhere else.
+  //
+  // Imported lazily: this module pulls in the native mediasoup binding, which
+  // exists only in the custom Socket.io server process. A static import would
+  // break every Next build that touches this route.
+  try {
+    const { closeClassMedia } = await import("@/lib/socket/handlers/mediaHandlers");
+    closeClassMedia(id);
+  } catch (error) {
+    console.error("[classes/[id]/room] could not close the media room:", error);
+  }
+
   await writeAuditLog({ action: "class.room.end", userId: payload.userId, metadata: { classId: id }, request });
   return NextResponse.json({ success: true, status: "COMPLETED" });
 }

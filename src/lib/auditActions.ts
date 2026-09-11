@@ -27,6 +27,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "admin.user.update": "Account role or status changed",
   "admin.parentLink.create": "Parent linked to child",
   "admin.parentLink.delete": "Parent unlinked from child",
+  "invite.create": "Invite code issued",
+  "invite.revoke": "Invite code withdrawn",
 
   // Viewing someone else's data
   "student.overview.view": "Viewed a student's record",
@@ -40,6 +42,16 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "attendance.mark": "Attendance marked",
   "class.room.start": "Class started",
   "class.room.end": "Class ended",
+  "class.update": "Class rescheduled or edited",
+  // Reads "by the head" in the viewer when the metadata carries `override: true` —
+  // a head cancelling a coach's class is routine, but "who called off my Tuesday"
+  // deserves an answer.
+  "class.cancel": "Class cancelled",
+  "class.delete": "Class deleted",
+  "class.enroll": "Student added to a class",
+  "batch.create": "Batch created",
+  "batch.update": "Batch renamed or reassigned",
+  "batch.enroll": "Student enrolled in a batch",
 
   // Money
   "payment.record": "Payment recorded",

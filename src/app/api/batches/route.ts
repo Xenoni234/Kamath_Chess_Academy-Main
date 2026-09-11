@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { requireRole } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { writeAuditLog } from "@/lib/audit";
 import { createBatchSchema } from "@/lib/validations/phase3";
 
 /** Resolve a COACH user to their CoachProfile id, creating the profile if needed. */
@@ -82,7 +83,10 @@ export async function POST(request: NextRequest) {
   // A failure below here is a server fault, not an auth failure. Returning 401
   // for it used to log every user out on a single database blip, silently.
   try {
-    const denied = requireRole(payload, ["HR", "HEAD"]);
+    // A coach may form a group of their own students — that is teaching, not
+    // administration. The one thing they cannot do is create it under somebody
+    // else's name, so `coachUserId` is ignored for a coach and forced to self.
+    const denied = requireRole(payload, ["HR", "HEAD", "COACH"]);
     if (denied) return denied;
 
     const parsed = createBatchSchema.safeParse(await request.json());
@@ -93,10 +97,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, description, coachUserId } = parsed.data;
+    const { name, description } = parsed.data;
+    const coachUserId = payload.role === "COACH" ? payload.userId : parsed.data.coachUserId;
     const coachId = coachUserId ? await coachProfileIdForUser(coachUserId) : null;
 
     const batch = await db.batch.create({ data: { name, description, coachId } });
+
+    await writeAuditLog({
+      action: "batch.create",
+      userId: payload.userId,
+      metadata: { batchId: batch.id, name, coachUserId: coachUserId ?? null },
+      request,
+    });
+
     return NextResponse.json({ success: true, batch });
   } catch (error) {
     console.error("[batches] POST failed:", error);

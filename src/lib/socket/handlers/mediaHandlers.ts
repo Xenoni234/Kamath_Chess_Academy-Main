@@ -1,12 +1,14 @@
 import type { Server, Socket } from "socket.io";
 import type { types } from "mediasoup";
 import {
+  closeRouter,
   createWebRtcTransport,
   getRouter,
   mediaEnabled,
   transportParams,
 } from "../../media/mediasoup.ts";
 import { canAccess } from "./classHandlers.ts";
+import { getIo } from "../io.ts";
 import {
   mediaConnectSchema,
   mediaConsumeSchema,
@@ -27,6 +29,8 @@ import {
  */
 
 type Peer = {
+  /** Whose peer this is. Lets a reconnecting person evict their own stale entry. */
+  userId: string;
   username: string;
   transports: Map<string, types.WebRtcTransport>;
   producers: Map<string, types.Producer>;
@@ -55,6 +59,7 @@ function getPeer(classId: string, socket: Socket): Peer {
   let peer = peers.get(socket.id);
   if (!peer) {
     peer = {
+      userId: (socket.data.userId as string) ?? "",
       username: (socket.data.username as string) ?? "student",
       transports: new Map(),
       producers: new Map(),
@@ -119,7 +124,24 @@ export function setupMediaHandlers(io: Server, socket: Socket) {
       // Entry point: authorize independently (don't depend on class:join ordering)
       // and join the room so subsequent media events pass the `inRoom` gate.
       if (!mediaEnabled()) return cb({ error: "unavailable" });
-      if (!(await canAccess(classId, socket.data.userId))) return cb({ error: "forbidden" });
+      if (!(await canAccess(classId, socket.data.userId, socket.data.role))) return cb({ error: "forbidden" });
+
+      // Evict any earlier peer belonging to the SAME PERSON in this class.
+      //
+      // Peers are keyed by socket id, and a page reload produces a new socket
+      // before the old one's `disconnect` necessarily lands. The stale peer then
+      // still holds transports and producers, and the rejoining client is offered
+      // its own dead producers to consume — which is why video worked on the first
+      // visit and failed after a refresh. One person is in a room once.
+      const existing = rooms.get(classId);
+      if (existing) {
+        for (const [otherId, peer] of existing) {
+          if (otherId !== socket.id && peer.userId === socket.data.userId) {
+            cleanupPeer(io, classId, otherId);
+          }
+        }
+      }
+
       socket.join(room(classId));
       const router = await getRouter(classId);
       joined.add(classId);
@@ -265,4 +287,30 @@ export function setupMediaHandlers(io: Server, socket: Socket) {
       }
     }
   });
+}
+
+/**
+ * Close every peer's media in a class and tell the room it is over.
+ *
+ * Called when the coach ends the class. Without it, "End class" only changed a
+ * status column: the video kept running, students stayed connected, and the
+ * lesson was over in the database but not in the room.
+ *
+ * Exported for the HTTP route, which is the thing that knows a class ended.
+ */
+export function closeClassMedia(classId: string) {
+  const io = getIo();
+  const peers = rooms.get(classId);
+  if (peers && io) {
+    for (const socketId of [...peers.keys()]) {
+      try {
+        cleanupPeer(io, classId, socketId);
+      } catch (error) {
+        console.error("[media] could not close a peer on class end:", error);
+      }
+    }
+  }
+  rooms.delete(classId);
+  closeRouter(classId);
+  io?.to(room(classId)).emit("class:ended", { classId });
 }

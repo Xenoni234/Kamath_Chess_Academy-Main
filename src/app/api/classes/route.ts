@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
 import { requireRole } from "@/lib/authz";
+import type { ClassStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { createClassSchema } from "@/lib/validations/phase3";
 import { coachProfileIdForUser } from "../batches/route";
@@ -11,6 +12,7 @@ type ClassRow = {
   id: string;
   title: string;
   description: string | null;
+  status: ClassStatus;
   startsAt: Date;
   endsAt: Date;
   meetingUrl: string | null;
@@ -18,16 +20,27 @@ type ClassRow = {
   coach: { user: { username: string } } | null;
 };
 
-function shape(rows: ClassRow[]) {
+/**
+ * `canManage` says whether this viewer may move or cancel the class, so the page
+ * can offer the controls the server would actually honour — the mismatch that
+ * previously let the head see buttons the API refused.
+ *
+ * It is a role flag rather than a per-row lookup because the scope below has
+ * already done the work: a coach's list contains only classes they coach, and
+ * HR/HEAD may manage anything. A student or parent never can.
+ */
+function shape(rows: ClassRow[], canManage: boolean) {
   return rows.map((c) => ({
     id: c.id,
     title: c.title,
     description: c.description,
+    status: c.status,
     startsAt: c.startsAt,
     endsAt: c.endsAt,
     meetingUrl: c.meetingUrl,
     batchName: c.batch?.name ?? null,
     coachName: c.coach?.user.username ?? null,
+    canManage,
   }));
 }
 
@@ -40,6 +53,35 @@ const CLASS_INCLUDE = {
 
 /** Upper bound on a schedule listing, so the query cannot grow without limit. */
 const CLASS_PAGE_SIZE = 200;
+
+/**
+ * Which of the three lists a class belongs in.
+ *
+ * Status first, clock second — and that ordering is the fix for a real bug. The
+ * filter used to be purely `endsAt >= now`, so a class the coach had explicitly
+ * ENDED still sat under "Upcoming" until its scheduled finish time passed. The
+ * coach pressed End class, watched the room close, and then saw the same class
+ * advertised as upcoming.
+ *
+ * A class that was scheduled and simply never started is "ended" once its time
+ * has passed. It is not upcoming — nobody is going to attend it now — and
+ * leaving it in the upcoming list buries the classes that really are next.
+ */
+function bucketsFor(now: Date) {
+  return {
+    ongoing: { status: "ONGOING" as const },
+    upcoming: { status: "SCHEDULED" as const, endsAt: { gte: now } },
+    ended: {
+      OR: [
+        { status: { in: ["COMPLETED", "CANCELLED"] as ClassStatus[] } },
+        { status: "SCHEDULED" as const, endsAt: { lt: now } },
+      ],
+    },
+  };
+}
+
+/** How far back the "ended" list reaches. Older than this is history, not a list. */
+const ENDED_PAGE_SIZE = 50;
 
 async function batchIdsForStudents(studentIds: string[]): Promise<string[]> {
   if (studentIds.length === 0) return [];
@@ -67,51 +109,70 @@ export async function GET(request: NextRequest) {
   // for it used to log every user out on a single database blip, silently.
   try {
     const now = new Date();
-    const upcoming = { endsAt: { gte: now } };
+    const buckets = bucketsFor(now);
+    const canManage =
+      payload.role === "HR" || payload.role === "HEAD" || payload.role === "COACH";
+
+    /**
+     * The role's own scope — the filter that decides WHICH classes this person
+     * may see at all. Combined with a bucket to answer "which of theirs are on
+     * now, next, and done".
+     */
+    let scope: Record<string, unknown>;
 
     if (payload.role === "HR" || payload.role === "HEAD") {
-      const rows = await db.class.findMany({ where: upcoming, include: CLASS_INCLUDE, orderBy: { startsAt: "asc" }, take: CLASS_PAGE_SIZE });
-      return NextResponse.json({ success: true, classes: shape(rows) });
+      scope = {};
+    } else if (payload.role === "COACH") {
+      scope = { coach: { userId: payload.userId } };
+    } else if (payload.role === "STUDENT") {
+      scope = { batchId: { in: await batchIdsForStudents([payload.userId]) } };
+    } else {
+      // PARENT — their children's classes. Log the access (DPDPA: minor data).
+      const links = await db.parentStudent.findMany({
+        where: { parentId: payload.userId },
+        select: { studentId: true },
+      });
+      const studentIds = links.map((l) => l.studentId);
+      await writeAuditLog({
+        action: "PARENT_VIEW_CHILD_SCHEDULE",
+        userId: payload.userId,
+        metadata: { studentIds },
+        request,
+      });
+      scope = { batchId: { in: await batchIdsForStudents(studentIds) } };
     }
 
-    if (payload.role === "COACH") {
-      const rows = await db.class.findMany({
-        where: { ...upcoming, coach: { userId: payload.userId } },
+    const [ongoing, upcoming, ended] = await Promise.all([
+      db.class.findMany({
+        where: { ...scope, ...buckets.ongoing },
         include: CLASS_INCLUDE,
         orderBy: { startsAt: "asc" },
         take: CLASS_PAGE_SIZE,
-      });
-      return NextResponse.json({ success: true, classes: shape(rows) });
-    }
-
-    if (payload.role === "STUDENT") {
-      const batchIds = await batchIdsForStudents([payload.userId]);
-      const rows = await db.class.findMany({
-        where: { ...upcoming, batchId: { in: batchIds } },
+      }),
+      db.class.findMany({
+        where: { ...scope, ...buckets.upcoming },
         include: CLASS_INCLUDE,
         orderBy: { startsAt: "asc" },
         take: CLASS_PAGE_SIZE,
-      });
-      return NextResponse.json({ success: true, classes: shape(rows) });
-    }
+      }),
+      db.class.findMany({
+        // Newest first: the class that just finished is the one being looked for.
+        where: { ...scope, ...buckets.ended },
+        include: CLASS_INCLUDE,
+        orderBy: { startsAt: "desc" },
+        take: ENDED_PAGE_SIZE,
+      }),
+    ]);
 
-    // PARENT — their children's classes. Log the access (DPDPA: minor data).
-    const links = await db.parentStudent.findMany({ where: { parentId: payload.userId }, select: { studentId: true } });
-    const studentIds = links.map((l) => l.studentId);
-    await writeAuditLog({
-      action: "PARENT_VIEW_CHILD_SCHEDULE",
-      userId: payload.userId,
-      metadata: { studentIds },
-      request,
+    return NextResponse.json({
+      success: true,
+      ongoing: shape(ongoing, canManage),
+      upcoming: shape(upcoming, canManage),
+      ended: shape(ended, canManage),
+      // Kept so nothing that still reads `classes` breaks: it is what the page
+      // used to render, i.e. everything not yet finished.
+      classes: shape([...ongoing, ...upcoming], canManage),
     });
-    const batchIds = await batchIdsForStudents(studentIds);
-    const rows = await db.class.findMany({
-      where: { ...upcoming, batchId: { in: batchIds } },
-      include: CLASS_INCLUDE,
-      orderBy: { startsAt: "asc" },
-      take: CLASS_PAGE_SIZE,
-    });
-    return NextResponse.json({ success: true, classes: shape(rows) });
   } catch (error) {
     console.error("[classes] GET failed:", error);
     return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });

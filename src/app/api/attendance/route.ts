@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessToken } from "@/lib/auth";
+import { canManageClass } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
 import { attendanceMarkSchema } from "@/lib/validations/admin";
@@ -7,14 +8,6 @@ import { attendanceMarkSchema } from "@/lib/validations/admin";
 export const runtime = "nodejs";
 
 /** The class's coach, or HR/HEAD, may mark and read its attendance. */
-async function canManageClass(classId: string, payload: { userId: string; role: string }) {
-  if (payload.role === "HR" || payload.role === "HEAD") return true;
-  const cls = await db.class.findUnique({
-    where: { id: classId },
-    select: { coach: { select: { userId: true } } },
-  });
-  return Boolean(cls && cls.coach?.userId === payload.userId);
-}
 
 /** Attendance for one class, with the roster so unmarked students still appear. */
 export async function GET(request: NextRequest) {
@@ -31,7 +24,7 @@ export async function GET(request: NextRequest) {
   const classId = request.nextUrl.searchParams.get("classId");
   if (!classId) return NextResponse.json({ success: false, message: "classId is required" }, { status: 400 });
 
-  if (!(await canManageClass(classId, payload))) {
+  if (!(await canManageClass(payload, classId))) {
     return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
   }
 
@@ -85,7 +78,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { classId, entries } = parsed.data;
-  if (!(await canManageClass(classId, payload))) {
+  if (!(await canManageClass(payload, classId))) {
     return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
   }
 

@@ -19,13 +19,25 @@ function room(classId: string) {
 }
 
 /** Is this user the class's coach, or enrolled in the class/its batch? */
-export async function canAccess(classId: string, userId: string): Promise<boolean> {
+/**
+ * May this person be in this class's room — its chat, roster and video?
+ *
+ * The coach, its enrolled students, and academy staff.
+ *
+ * Staff were missing, and the omission was invisible in the worst way: the HTTP
+ * room route let a head open the page and rendered every control, while this —
+ * the check the SOCKET uses — refused them. So the head saw Start class and an
+ * attendance panel, and the video answered "forbidden". Both sides now use the
+ * same rule.
+ */
+export async function canAccess(classId: string, userId: string, role?: string): Promise<boolean> {
   const cls = await db.class.findUnique({
     where: { id: classId },
     select: { batchId: true, coach: { select: { userId: true } } },
   });
   if (!cls) return false;
   if (cls.coach?.userId === userId) return true;
+  if (role === "HR" || role === "HEAD") return true;
   const enrolled = await db.classEnrollment.findFirst({
     where: {
       userId,
@@ -57,7 +69,7 @@ export function setupClassHandlers(io: Server, socket: Socket) {
     const parsed = classJoinSchema.safeParse(raw);
     if (!parsed.success) return;
     const { classId } = parsed.data;
-    if (!(await canAccess(classId, socket.data.userId))) {
+    if (!(await canAccess(classId, socket.data.userId, socket.data.role))) {
       socket.emit("class:error", { message: "You are not part of this class." });
       return;
     }
