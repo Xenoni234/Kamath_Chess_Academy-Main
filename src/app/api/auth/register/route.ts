@@ -5,6 +5,13 @@ import { hashPassword } from "@/lib/auth";
 import { verifyOtpCode } from "@/lib/otp";
 import { registerSchema } from "@/lib/validations";
 
+/**
+ * Bumped whenever the wording of the terms, privacy policy or consent checkboxes
+ * changes materially. Stored per user so we can tell who agreed to which version,
+ * and so a future re-consent prompt knows who still needs asking.
+ */
+const CONSENT_VERSION = "2026-09";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -19,41 +26,66 @@ export async function POST(request: Request) {
     }
 
     const data = result.data;
+    // One canonical form of the address everywhere: the OTP row, the lookup and
+    // the stored user. These disagreed before, so a capitalised address could be
+    // sent a code it could never redeem.
+    const email = data.email.toLowerCase();
 
-    if (!(process.env.NODE_ENV === "development" && data.otp === "000000")) {
-      const otpResult = await verifyOtpCode({
-        email: data.email,
-        otp: data.otp,
-        purpose: "register",
-      });
+    // No bypass. The `NODE_ENV === "development" && otp === "000000"` shortcut that
+    // used to live here was the only reason registration appeared to work — nothing
+    // in the app requested a real code, so production sign-up returned 400 every time.
+    const otpResult = await verifyOtpCode({ email, otp: data.otp, purpose: "register" });
 
-      if (!otpResult.success) {
-        return NextResponse.json({ success: false, message: otpResult.error }, { status: 400 });
-      }
+    if (!otpResult.success) {
+      return NextResponse.json({ success: false, message: otpResult.error }, { status: 400 });
     }
 
     const passwordHash = await hashPassword(data.password);
     const role = "STUDENT";
 
+    // One timestamp for every consent granted in this request.
+
+    const now = new Date();
+
     const user = await db.user.create({
       data: {
         username: data.username,
-        email: data.email.toLowerCase(),
+        email,
         mobile: data.mobile,
         passwordHash,
         role,
-        isVerified: true,
+        isVerified: otpResult.success,
         isActive: true,
         fideId: data.fideId || null,
         lichessId: data.lichessId || null,
         chesscomId: data.chesscomId || null,
         studentProfile: { create: {} },
+
+        // DPDPA consent, recorded as timestamps on the account.
+        //
+        // These used to exist only inside the audit-log JSON below, and the three
+        // MANDATORY consents were validated by the schema and then discarded
+        // entirely — so the academy held no queryable proof of consent for a
+        // minor's data. `registerSchema` refines that all three are true before
+        // we get here, so stamping "now" is accurate.
+        consentVersion: CONSENT_VERSION,
+        consentTermsAt: now,
+        consentAgeAt: now,
+        consentDataProcessingAt: now,
+        consentMarketing: data.agreedToMarketing,
+        consentMarketingAt: data.agreedToMarketing ? now : null,
+        consentSms: data.agreedToSms,
+        consentSmsAt: data.agreedToSms ? now : null,
+
+        // Kept alongside the columns: it preserves the historical record format
+        // that scripts/backfillConsent.ts reads for pre-existing accounts.
         auditLogs: {
           create: {
             action: "USER_REGISTERED",
             metadata: {
               marketingEmailConsent: data.agreedToMarketing,
               smsNotificationConsent: data.agreedToSms,
+              consentVersion: CONSENT_VERSION,
             },
           },
         },
