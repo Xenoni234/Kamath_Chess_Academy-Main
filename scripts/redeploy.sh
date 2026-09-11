@@ -51,8 +51,14 @@ docker compose up -d --build
 
 echo
 echo "==> Waiting for the app to come back"
+# Check from INSIDE the compose network, not from the host. docker-compose.yml
+# uses `expose`, not `ports`, so 3000 is reachable only between containers —
+# Caddy is the sole public door. Curling localhost:3000 on the host could never
+# succeed, so this check reported a failed deploy on a deploy that had worked.
 for i in $(seq 1 30); do
-  if curl -fsS -o /dev/null http://localhost:3000/api/health 2>/dev/null; then
+  if docker compose exec -T app node -e \
+      "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+      >/dev/null 2>&1; then
     echo "    Healthy after ${i}s."
     echo
     echo "==> Now live:"
