@@ -216,6 +216,8 @@ export function useMediaRoom(classId: string, enabled: boolean) {
 
   useEffect(() => {
     if (!enabled || !classId) return;
+    // Async: state is set after an await, not synchronously in the effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     start();
     return () => leave();
     // eslint-disable-next-line react-hooks/exhaustive-deps
