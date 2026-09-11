@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { PORTALS, PORTAL_KEYS, type PortalKey } from "@/lib/portals";
 import LoginForm from "@/components/auth/LoginForm";
+import AuthShell from "@/components/auth/AuthShell";
 
 export function generateStaticParams() {
   return PORTAL_KEYS.map((portal) => ({ portal }));
@@ -12,9 +13,12 @@ export function generateStaticParams() {
 export default async function PortalLoginPage({ params }: { params: Promise<{ portal: string }> }) {
   const { portal } = await params;
   if (!PORTAL_KEYS.includes(portal as PortalKey)) notFound();
+  const config = PORTALS[portal as PortalKey];
   return (
-    <Suspense fallback={null}>
-      <LoginForm portal={PORTALS[portal as PortalKey]} />
-    </Suspense>
+    <AuthShell title={config.title} subtitle={config.subtitle}>
+      <Suspense fallback={null}>
+        <LoginForm portal={config} />
+      </Suspense>
+    </AuthShell>
   );
 }
