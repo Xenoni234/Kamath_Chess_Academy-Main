@@ -6,14 +6,15 @@
     "setup:engine": "node scripts/copyEngine.mjs",
     "predev": "npm run setup:engine",
     "dev": "node server.mjs",
-    "prebuild": "npm run setup:engine",
+    "prebuild": "npm run setup:engine && prisma generate",
     "build": "next build",
     "start": "NODE_ENV=production node server.mjs",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "import:puzzles": "npx tsx --env-file=.env.local scripts/importPuzzles.ts",
     "reset:data": "npx tsx --env-file=.env.local scripts/resetTestData.ts",
-    "worker": "npx tsx --env-file=.env.local worker.ts"
+    "worker": "tsx --env-file=.env.local worker.ts",
+    "worker:prod": "tsx worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
@@ -67,6 +68,7 @@
     "eslint-config-next": "16.2.9",
     "stockfish": "^18.0.8",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   },
   "engines": {
