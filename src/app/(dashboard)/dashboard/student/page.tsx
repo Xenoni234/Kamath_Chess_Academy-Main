@@ -5,6 +5,7 @@ import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { verifyAccessToken } from "@/lib/auth";
 import { hasRole } from "@/lib/authz";
 import { getStudentCards } from "@/lib/dashboard";
+import ParentCodeCard from "@/components/dashboard/ParentCodeCard";
 
 export default async function StudentDashboardPage() {
   const token = (await cookies()).get("kca_access_token")?.value ?? "";
@@ -27,6 +28,7 @@ export default async function StudentDashboardPage() {
     <>
       <DashboardHeader title="Student Dashboard" username={payload.username} />
       <DashboardCards cards={cards} />
+      <ParentCodeCard />
     </>
   );
 }
