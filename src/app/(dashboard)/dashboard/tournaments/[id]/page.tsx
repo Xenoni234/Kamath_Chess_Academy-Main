@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Trophy, ArrowLeft, Loader2, Play, SkipForward, Flag, Check } from "lucide-react";
 import { getSocket } from "@/lib/socket/client";
 import { cn } from "@/lib/utils";
+import { useHasRole } from "@/components/auth/RoleContext";
 
 type Standing = { rank: number; userId?: string; username: string; score: number };
 type Detail = {
@@ -32,7 +33,6 @@ export default function TournamentDetailPage() {
   const router = useRouter();
   const [t, setT] = useState<Detail | null>(null);
   const [standings, setStandings] = useState<Standing[]>([]);
-  const [role, setRole] = useState("");
   const [round, setRound] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -41,18 +41,20 @@ export default function TournamentDetailPage() {
   // render would not re-render when the lookup fails.
   const [notFound, setNotFound] = useState(false);
 
+  // From context, not a fetch: the server already knew this, so the manager
+  // controls render correctly on the first paint instead of popping in late.
+  // Declared with the other hooks, above the early returns — hooks must run in
+  // the same order on every render.
+  const isManager = useHasRole("HR", "HEAD");
+
   const load = useCallback(async () => {
-    const [detail, me] = await Promise.all([
-      fetch(`/api/tournaments/${id}`).then((r) => r.json()),
-      fetch("/api/auth/me").then((r) => r.json()),
-    ]);
+    const detail = await fetch(`/api/tournaments/${id}`).then((r) => r.json());
     if (detail.success) {
       setT(detail.tournament);
       setStandings(detail.tournament.standings);
     } else {
       setNotFound(true);
     }
-    if (me.success) setRole(me.user.role);
   }, [id]);
 
   useEffect(() => {
@@ -134,8 +136,6 @@ export default function TournamentDetailPage() {
       </div>
     );
   }
-
-  const isManager = role === "HR" || role === "HEAD";
 
   return (
     <div className="w-full max-w-3xl mx-auto">

@@ -12,6 +12,8 @@ type AnalysisMoveListProps = {
   onSelectPly: (ply: number) => void;
   /** Populated once a full-game scan has run. */
   classifications?: Map<number, MoveClassification>;
+  /** Plies carrying a coach note, keyed by ply — mirrors `classifications`. */
+  annotations?: Map<number, string>;
 };
 
 export default function AnalysisMoveList({
@@ -19,6 +21,7 @@ export default function AnalysisMoveList({
   currentPly,
   onSelectPly,
   classifications,
+  annotations,
 }: AnalysisMoveListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -50,6 +53,7 @@ export default function AnalysisMoveList({
 
     const classification = classifications?.get(node.ply);
     const meta = classification ? CLASSIFICATION_META[classification] : null;
+    const note = annotations?.get(node.ply);
     const isActive = node.ply === currentPly;
 
     return (
@@ -69,6 +73,12 @@ export default function AnalysisMoveList({
           <span className={cn("ml-1 font-bold", meta.textClass)} title={meta.label}>
             {meta.symbol}
           </span>
+        ) : null}
+        {note ? (
+          <span
+            className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-kca-cyan align-middle"
+            title="Coach note on this move"
+          />
         ) : null}
       </button>
     );
