@@ -69,17 +69,17 @@ export default function Footer() {
             </h4>
             <ul className="space-y-2">
               <li>
-                <Link href="#" className="font-sans text-sm text-kca-gray-400 hover:text-kca-cyan transition-colors">
+                <Link href="/privacy" className="font-sans text-sm text-kca-gray-400 hover:text-kca-cyan transition-colors">
                   Privacy Policy
                 </Link>
               </li>
               <li>
-                <Link href="#" className="font-sans text-sm text-kca-gray-400 hover:text-kca-cyan transition-colors">
+                <Link href="/terms" className="font-sans text-sm text-kca-gray-400 hover:text-kca-cyan transition-colors">
                   Terms of Service
                 </Link>
               </li>
               <li>
-                <Link href="#" className="font-sans text-sm text-kca-gray-400 hover:text-kca-cyan transition-colors">
+                <Link href="/refund" className="font-sans text-sm text-kca-gray-400 hover:text-kca-cyan transition-colors">
                   Refund Policy
                 </Link>
               </li>

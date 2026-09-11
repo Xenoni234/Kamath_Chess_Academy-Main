@@ -82,14 +82,29 @@ if [[ "$EXISTING" != "0" ]]; then
 fi
 
 # ---------------------------------------------------------------- the move --
-echo "==> dumping (about 157 MB, most of it the 495k-row Puzzle table)"
-pg_dump --format=custom --no-owner --no-acl --file="$DUMP_FILE" "$OLD_DIRECT_URL"
+echo "==> dumping (about 157 MB, most of it the 500k-row Puzzle table)"
+# --schema=public is load-bearing. A full dump also carries Supabase's own
+# internal schemas (auth, storage, realtime, vault, extensions), which already
+# exist in the target and are owned by roles the `postgres` user cannot touch —
+# producing 300+ alarming "permission denied" / "must be owner" errors that are
+# entirely harmless and entirely avoidable. This app keeps everything in public.
+pg_dump --format=custom --no-owner --no-acl --schema=public --file="$DUMP_FILE" "$OLD_DIRECT_URL"
 echo "    wrote $(du -h "$DUMP_FILE" | cut -f1)"
 
 echo "==> restoring"
 # --no-owner/--no-acl: Supabase manages its own roles, so ownership from the old
 # project must not be carried across.
-pg_restore --no-owner --no-acl --dbname="$NEW_DIRECT_URL" "$DUMP_FILE"
+#
+# `|| true`: pg_restore exits non-zero whenever it ignored ANY error, and under
+# `set -e` that aborted the script before the verification below — which is the
+# part that actually tells you whether the move worked. Verification is the
+# gate, not pg_restore's exit code, so failures surface as a row-count mismatch.
+pg_restore --no-owner --no-acl --dbname="$NEW_DIRECT_URL" "$DUMP_FILE" || {
+  echo
+  echo "    pg_restore reported errors (see above)."
+  echo "    Row counts below are the real test — read them before concluding anything."
+  echo
+}
 
 # ------------------------------------------------------------ verification --
 echo

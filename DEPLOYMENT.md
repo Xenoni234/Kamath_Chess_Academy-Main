@@ -159,6 +159,11 @@ services:
     env_file: .env.production
     command: ["npm", "run", "worker"]
     depends_on: [redis]
+    # The worker handles SIGTERM by finishing the job it is on before exiting.
+    # Docker's default is to SIGKILL 10s later, which is not long enough for a
+    # Puppeteer render and would leave a half-written PDF and a row stuck in
+    # `processing`. 120s matches the longest realistic job.
+    stop_grace_period: 120s
 
   redis:                         # dedicated TCP Redis for BullMQ (QUEUE_REDIS_URL)
     image: redis:7-alpine
@@ -258,7 +263,8 @@ Copy `.env.example` → `.env.production` and fill it in. **Required** to boot a
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | App cache / presence. |
 | `QUEUE_REDIS_URL` | `redis://redis:6379` (the Compose service) — **required for durable jobs**; without it jobs run inline and don't survive a restart. |
 | `LICHESS_API_TOKEN` | Opening Explorer + novelty mining + Opening Trainer. Any Lichess personal token. |
-| `RESEND_API_KEY`, `EMAIL_FROM` | OTP, invoices, report/dossier emails. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | **Required.** Registration OTP, staff invites, password resets, reports. Without it nobody can sign up. |
+| `CONTACT_NOTIFY_EMAIL` | Optional — where website enquiries are sent (defaults to `EMAIL_FROM`). |
 | `AI_PROVIDER` | `openai-compatible` (Groq, free tier) recommended. |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | For `openai-compatible` (Groq). *(or set `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`.)* |
 | `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SOCKET_URL` | Both `https://kamathchessacademy.com`. |
@@ -266,9 +272,16 @@ Copy `.env.example` → `.env.production` and fill it in. **Required** to boot a
 
 **Optional / off for launch:**
 - `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` — only if you run the Neo4j service (see §8).
-- `MSG91_AUTH_KEY` / `MSG91_TEMPLATE_ID` — SMS OTP (email OTP works without it).
+- `MSG91_AUTH_KEY` / `MSG91_TEMPLATE_ID` — **not implemented.** OTP is email-only (Resend); these vars are reserved for a future SMS channel and do nothing today. Don't provision MSG91 expecting it to work.
 - `CLOUDINARY_*` — image uploads, if used.
-- `RAZORPAY_*` / `NEXT_PUBLIC_RAZORPAY_KEY_ID` — **leave unset**; payments are intentionally disabled
+- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` — the payments
+  switch. Leave all three unset and the site stays free: every payment surface hides itself
+  and `/api/payments/order` answers 503. Set all three (test-mode keys work) and checkout is
+  live with no code change. **Also point a Razorpay webhook at
+  `https://kamathchessacademy.com/api/payments/webhook`** for the `payment.captured` event —
+  the browser callback is only a UI cue, the webhook is what actually settles a payment.
+- `NEXT_PUBLIC_RAZORPAY_KEY_ID` — not read by the app; the checkout key is served from
+  `RAZORPAY_KEY_ID` through the order route, so there is one source of truth.
   (`isPaymentsEnabled()` returns false — the site is free during testing).
 - `OLLAMA_*` — not used in production (don't run the coach off a local model).
 

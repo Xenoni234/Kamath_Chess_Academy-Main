@@ -19,9 +19,11 @@ Solo-built by a student developer, using AI coding agents. This is both a
 real product for a chess academy and a portfolio centerpiece.
 
 **Repo:** `github.com/Xenoni234/Kamath_Chess_Academy-Main`
-**Local path:** `~/dev/Phase0` (folder name is historic — it holds the
-whole project, not just Phase 0). Moved off `~/Desktop` deliberately: iCloud
-syncs the Desktop and wrecked this repo (see below) — do not move it back.
+**Local path:** `~/Desktop/Phase0` (folder name is historic — it holds the
+whole project, not just Phase 0). It lived at `~/dev/Phase0` for a while because
+iCloud Desktop sync wrecked it; **iCloud Drive is now off on this machine**, which
+is the only reason the Desktop is safe. If iCloud Drive is ever turned back on,
+move the repo out again — see the iCloud entry under Known gaps for the symptoms.
 
 ---
 
@@ -38,6 +40,25 @@ syncs the Desktop and wrecked this repo (see below) — do not move it back.
 Role is stored on the `User` model as a Prisma enum. Route protection lives
 in `src/proxy.ts` (this Next.js version names middleware `proxy`, not
 `middleware`).
+
+**Role access is enforced in four places, deliberately — do not rely on any one
+of them alone.** `proxy.ts` (edge, by path prefix), a `hasRole` guard inside each
+role page (so a proxy misconfiguration is not the only thing between a student and
+academy revenue), `requireRole` on mutating API routes, and — for anything about a
+*specific* student — the relationship helpers in `src/lib/authz.ts`
+(`isParentOf` / `isCoachOf` / `canViewStudent`). Role alone never answers "may this
+person see THIS student"; always go through `canViewStudent`, and return **404, not
+403**, so ids cannot be probed.
+
+**Accounts:** public registration always creates a STUDENT (`register/route.ts`
+hardcodes it). Every other role is created by staff via `/api/admin/users`, which
+sets an unusable random password and emails a one-time code — **a password is never
+generated, shown, or emailed.** The first HEAD is a chicken-and-egg and comes from
+`scripts/createHeadUser.ts`. HR may create STUDENT/PARENT/COACH; only HEAD may
+create staff or change roles, and the last active HEAD cannot be demoted.
+
+**Login portals** (`/login/student|parent|coach|staff`) are **presentation only**.
+The account's role decides access; using the "wrong" door grants nothing.
 
 ---
 
@@ -205,24 +226,21 @@ reaching the same Four Knights position. Note `transpositions: 0` is a normal
 result on a small sample: the query only reports a bypass when a *weak* position
 is reachable by two or more distinct move-orders in their own games.
 
-### Phase 5 — Digital Second: OTB, manual games, evolution 🔨 IN PROGRESS (tasks 2-5 done; task 1 Supabase migration blocked on the user; manual-paste UI still pending)
+### Phase 5 — Digital Second: OTB, manual games, evolution ✅ COMPLETE
 Extends Phase 4 from online-usernames-only to the games that actually decide
 tournaments. Tasks in order:
 
-1. **Supabase region migration — DO THIS FIRST. Blocked on the user.**
-   `scripts/migrate-region.sh` is written and tested and `libpq` is installed;
-   it needs a Mumbai (`ap-south-1`) Supabase project and its **direct (5432)**
-   URL. Measured justification: `SELECT 1` against the current Tokyo instance
-   costs **134 ms**, and the full notifications route also costs 134 ms — i.e.
-   essentially every API response in the app is paying pure round-trip, not
-   query time. `ap-south-1` should bring that to ~20-30 ms. Update the region
-   noted in this file once it lands.
+1. **Supabase region migration — ✅ DONE 11 Sept 2026.** Moved Tokyo →
+   Mumbai (`ap-south-1`) with `scripts/migrate-region.sh`. Row counts matched
+   table-by-table, all 94 indexes present, and `verifyRoles.ts` (15/15) plus
+   `verifyRegistration.ts` (11/11) both pass against the new instance. Measured
+   connect+query: **989 ms → 79 ms**.
 2. **Manual PGN input** (up to 15 games) — `src/lib/second/pgnImport.ts`. ✅ splitter + ply-aligned clock/eval extraction done; paste UI pending.
 3. **OTB games from a FIDE ID**, via Lichess broadcasts — `src/lib/second/otb.ts`. ✅ done. The dead `fideId` field is now load-bearing: a FIDE id pulls the opponent's OTB games in as a `BROADCAST` account. Increment is **inferred from rising clocks** (OTB PGN has no `[TimeControl]`) and flagged `incrementInferred`; OTB games are **exempt from the recency budget trim** (scarce and old, but the most valuable for prep) and **excluded from the "how losses end" breakdown** (broadcast PGN has no `[Termination]`). Discovery scrapes `/fide/{id}/redirect` and **degrades to a name search** if that yields nothing. **Live-verified** through a dev-only diagnostic route (below): control FIDE 46608524 (Kapadi Yash) returns 22 real OTB games with per-game Elo and inferred 30s increments. Two live-only bugs were caught and fixed: the scraped redirect ids are ROUND ids that 404 on the tour-PGN endpoint, so search-resolved TOUR ids now lead the candidate list (they were being crowded out of the MAX_TOURS budget, yielding zero games); and broadcast PGN fetches are rate limited, so `fetchBroadcastPgn` now retries on 429 and the tour loop is paced.
 4. **Style evolution over time** — `src/lib/second/evolution.ts`. ✅ done. Buckets the scanned games by calendar-year era and recomputes the SAME metrics per era (accuracy, blunder rate, score, rating, repertoire share). A trend is stated **only when the two eras' confidence intervals do not overlap** — 88%±4 vs 91%±5 is not a trend and is never reported as one. Repertoire shifts (a line abandoned/adopted between the first and last era) are flagged. It never claims *why* the play changed. Fed into the AI narrative, UI, and PDF.
 5. **`logic.md`** — the whole Second AI explained for a chess player. ✅ done. Repo-root, plain language, all figures drawn from the code; 11 sections ending in the honest-limits list.
 
-### Phase 6 — Video classes 📋 PLANNED
+### Phase 6 — Video classes ✅ BUILT, NOT YET PROVEN WITH TWO REAL BROWSERS
 Inbuilt group video via mediasoup WebRTC SFU (no third-party API), Socket.io
 signalling, screen sharing for board demonstration, in-class chat.
 
@@ -288,6 +306,17 @@ Phase 2 is feature-complete. **Done and verified this phase:**
 
 **Known gaps / follow-ups:**
 
+- **Registration OTP is real now — and it was completely broken before.** Nothing
+  in the app ever called `/api/auth/otp/send`, so no `OtpVerification` row was ever
+  created and **every production sign-up returned 400**; it only appeared to work
+  because of a `NODE_ENV === "development" && otp === "000000"` bypass. The bypass
+  is gone, the register page now requests a code, and one shared `issueOtpCode`
+  (`src/lib/otp.ts`) serves registration, password reset and staff invites. Two
+  things that must stay: the email is **lowercased on both the write and the
+  lookup** (they disagreed, so any capitalised address could receive a code it
+  could never redeem), and the code comes from `crypto.randomInt`, not
+  `Math.random`. There is no standalone verify endpoint — it consumed the row, so
+  verify-then-register always failed.
 - **Move explanations are built from facts, never from a FEN. Do not "optimise"
   this back.** `/api/analysis/explain` takes only `{ fen, playedUci }`; the SERVER
   validates the move is legal, runs two short searches (top-3 with PVs at the
@@ -340,14 +369,18 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   All Stockfish work is now ~26 s; the local Ollama narrative is the bottleneck.
   Per-stage times are logged as `[second] <stage>: Ns` — check those first before
   optimising anything here.
-- **The database is in Tokyo (`ap-northeast-1`) and the users are in India** —
-  measured ~150 ms per round trip. That is the floor under every page. Moving to
-  `ap-south-1` takes it to ~20-30 ms; `scripts/migrate-region.sh` does the
-  dump/restore and verifies row counts, but you must create the Supabase project
-  and hand it the new **direct** (5432, not pooled 6543) URL. The whole DB is
-  157 MB, 145 MB of which is the 495k-row `Puzzle` table, so a plain
-  `pg_dump`/`pg_restore` is fine — no need to re-import from CSV. Needs
-  `brew install libpq` for pg_dump 17.
+- **The database is in Mumbai (`ap-south-1`) as of 11 Sept 2026.** It was in
+  Tokyo (`ap-northeast-1`), which cost ~150 ms per round trip from India and was
+  the floor under every page. Measured after the move: connect+query went from
+  **989 ms to 79 ms**. `scripts/migrate-region.sh` did the dump/restore and
+  verified row counts table-by-table; all 94 indexes came across, including the
+  `Puzzle_themes_idx` GIN index. The old Tokyo URLs are kept **commented out at
+  the top of `.env.local`** as the rollback — swapping two lines reverts it.
+  Do not delete the Tokyo project until Mumbai has run in production for a while.
+  Note `--schema=public` in the dump: a full dump drags in Supabase's own `auth`
+  / `storage` / `realtime` / `vault` schemas, which already exist in the target
+  and are owned by roles `postgres` cannot touch, producing 300+ alarming but
+  meaningless errors. Needs `brew install libpq` for pg_dump >= 17.
 - **Connection pooling is load-bearing** — `src/lib/db.ts` sets
   `idleTimeoutMillis` to 5 minutes. `pg-pool` defaults to 10 s, and
   NotificationBell polls every 30 s, so with the default *every* poll and every
@@ -388,9 +421,10 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   `LICHESS_API_TOKEN` it returns no novelties rather than guessing. A strong
   opponent's mainlines legitimately yield zero novelties — that is a real
   result, not a bug.
-- **RESOLVED — never put this repo under `~/Desktop` again.** iCloud syncs the
-  Desktop, and with ~48k `node_modules` files plus a constantly-rewritten
-  `.next/`, it caused three separate problems that looked unrelated:
+- **iCloud Desktop sync will destroy this repo — it is only safe here because
+  iCloud Drive is switched off.** When it was on, the Desktop plus ~48k
+  `node_modules` files and a constantly-rewritten `.next/` caused three separate
+  problems that looked unrelated:
   1. Conflict copies (`routes.d 2.ts`, `validator 3.ts`, …) in `.next/types/`,
      making `npx tsc --noEmit` fail with bogus `TS6200 / TS2300 duplicate
      identifier` errors.
@@ -399,9 +433,10 @@ Phase 2 is feature-complete. **Done and verified this phase:**
      reloading every open tab → a flood of `GET /login` hits that pinned the
      dev server.
 
-  Moving to `~/dev/Phase0` fixed all three (measured: hundreds of `/login`
-  hits per second → 3 in 30 s, and recompiles → 0). If conflict copies ever
-  reappear, the cleanup is:
+  Moving off the Desktop fixed all three (measured: hundreds of `/login` hits
+  per second → 3 in 30 s, and recompiles → 0); disabling iCloud Drive entirely
+  is what makes the current location equivalent. If conflict copies ever
+  reappear, iCloud is back on — turn it off (or move the repo), then clean up:
 
   ```bash
   find .next \( -name "* [0-9].ts" -o -name "* [0-9].tsx" \) -delete
@@ -415,6 +450,87 @@ tracked here are all **fixed and pushed**: challenge-ownership check on
 opening and puzzle routes; Zod validation on every API route and socket
 payload; registration field errors + password hint; and the `any`-type and
 unhandled-promise cleanups.
+
+---
+
+## Pre-launch state (11 Sept 2026)
+
+Target go-live is **14 Sept 2026** on `kamathchessacademy.com` (domain at Hostinger).
+See `DEPLOYMENT.md` for the runbook.
+
+**Done and verified against the live database:**
+- Schema is in sync — `ClassAttendance`, `ContactMessage` and the five `Payment`
+  columns are pushed. The push was purely additive; all 500,000 puzzle rows survived.
+- `scripts/verifyRoles.ts` passes 15/15 — the parent/coach/HR/HEAD authorisation
+  matrix, including the negative cases (a parent cannot read another child, a coach
+  cannot read a stranger).
+- `scripts/verifyRegistration.ts` passes 11/11 end-to-end against a running server:
+  a code is issued and stored lowercased, a wrong code is refused, the right code
+  creates a **verified STUDENT**, login works, and the code row is consumed.
+- `npx tsc --noEmit`, `npx eslint src` and `npm run build` are all clean.
+
+**The catch-all 401 is gone — do not reintroduce it.** 28 handlers wrapped
+`verifyAccessToken` *and* all their database work in one `try` whose `catch`
+returned 401 with no logging. A single database blip therefore looked exactly like
+an expired session: the client tore the session down and the server left no trace.
+`/api/auth/refresh` was the worst case — every signed-in user hits it every 15
+minutes, so one hiccup logged out everyone whose token happened to expire in that
+window. The shape now is always: authenticate in its own small `try` that returns
+401, then a second `try` around the real work that **logs and returns 500**.
+
+**All five of the previously-unbuilt features now exist**, each with a verify
+script: the coach attendance panel, invoice generation, coach game annotations, the
+audit-log viewer, and the role context provider. Razorpay is built and gated behind
+`isPaymentsEnabled()`.
+
+### Things that must not be undone
+
+- **`src/lib/pdf/launch.ts` is the only place Chromium may be launched.** All three
+  renderers used bare `puppeteer.launch({headless:true})`, and the deployment image
+  runs as root, where Chromium's setuid sandbox refuses to start. Every PDF in the
+  app would have failed on its first production render. `--no-sandbox` is safe here
+  and only here: the browser never loads anything but HTML this codebase generated.
+- **The class video room name is a secret, not the class id.** It used to be
+  `meet.jit.si/KCA-<class cuid>`, so anyone who guessed or was forwarded a URL could
+  join a live class of minors with no account, and the student's display name was in
+  the URL fragment. The key is generated behind the authorisation gate and **rotated
+  on every class start**. The name now goes through the Jitsi IFrame API's options
+  object, never the URL. Be honest about the limit: this closes enumeration and stale
+  links, but a secret room on public Jitsi is obscurity, not authentication — real
+  authentication is 8x8 JaaS with a signed JWT, or the self-hosted SFU.
+- **Erasure is an UPDATE, so no cascade fires.** `src/lib/compliance/anonymise.ts`
+  deletes every dependent row explicitly. Two are unreachable from the User relation
+  and are swept by email: `OtpVerification` rows with a null `userId` (they carry a
+  raw address), and `ContactMessage`, which has no FK at all. `GameReport` stays
+  `Restrict` deliberately — it never fires on an update, and changing it to Cascade
+  would be a data-loss footgun for anyone who later attempts a real delete.
+- **`Invoice.number` comes from the `invoice_counters` table**, not from counting
+  existing invoices — that loses a race under READ COMMITTED and dies on the unique
+  index. Gaps are correct; a reserved number must never be reused.
+- **The Razorpay webhook releases its idempotency marker on failure.** Insert-first
+  stops duplicate settlement, but if processing then throws, the retry would hit
+  P2002 and return 200 with the payment still PENDING forever. The catch deletes the
+  marker so the retry can work.
+- **`isPaymentsEnabled()` is server-only.** A `"use client"` file importing it gets
+  `false` baked into the bundle and checkout silently vanishes. It is passed down as
+  a prop; `scripts/verifyRazorpay.ts` greps for violations.
+
+### Verification
+
+Twelve self-cleaning scripts, all passing, all runnable with
+`npx tsx --env-file=.env.local scripts/<name>.ts` (those marked † need `npm run dev`):
+
+`verifyPdfLaunch` · `verifyRoomSecurity`† · `verifyAttendance`† · `verifyContact`† ·
+`verifyConsent`† · `verifyAnonymise` · `verifyInvoice` · `verifyRazorpay`† ·
+`verifyAudit`† · `verifyAnnotation`† · `verifyRoles` · `verifyRegistration`†
+
+**Never verified:** two-browser SFU video (Phase 6); the Razorpay **outbound** order
+call, which needs real test-mode keys (signature verification and idempotency ARE
+covered); and the authenticated UIs as a human sees them.
+
+**Still deferred by decision:** Phase 7 (mobile), SMS (the consent checkbox was
+removed rather than left collecting consent for a channel that cannot deliver), and
+Neo4j in production.
 
 ---
 
@@ -515,10 +631,8 @@ npx tsx --env-file=.env.local scripts/e2eProfileJob.ts         # the real job in
 npx tsx scripts/verifyOtb.ts <fideId> <broadcast.pgn>          # OTB identity + increment inference, offline against a PGN
 npx tsx --env-file=.env.local scripts/verifyOtb.ts <fideId>    # OTB full live chain against Lichess broadcasts
 npx tsx scripts/verifyEvolution.ts                             # style-evolution trend gating (synthetic, no engine/network)
-# Dev-only OTB live diagnostic (server must be running; 404 outside development):
-curl -s "http://localhost:3000/api/dev/otb?fideId=46608524&only=otb&max=60"   # real fetchOtbGames path
-curl -s "http://localhost:3000/api/dev/otb?fideId=46608524"                   # full per-stage breakdown
-curl -s "http://localhost:3000/api/dev/otb?fideId=46608524&dump=<tourId>"     # one tour: FIDE tags + first-game headers
+# (The dev-only /api/dev/otb diagnostic route was removed before launch — use
+#  scripts/verifyOtb.ts, which covers the same chain offline and live.)
 npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})
 npx tsc --noEmit     # type check, must pass with zero errors
 npm run build        # production build — the strictest gate
