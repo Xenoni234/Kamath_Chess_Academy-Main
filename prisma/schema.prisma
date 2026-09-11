@@ -125,6 +125,8 @@ model User {
   attendanceMarked ClassAttendance[] @relation("AttendanceMarker")
   recordedPayments Payment[]         @relation("PaymentRecorder")
   gameAnnotations  GameAnnotation[]  @relation("GameAnnotations")
+  invitesCreated   InviteCode[]      @relation("InviteCodesCreated")
+  inviteUsed       InviteCode?       @relation("InviteCodeUsed")
 
   /// DPDPA consent, stored as timestamps rather than booleans: a boolean cannot
   /// prove *when* consent was given, which is the one thing a regulator asks for.
@@ -142,6 +144,19 @@ model User {
   consentSms              Boolean   @default(false)
   consentSmsAt            DateTime?
 
+  /// What this person said they were at sign-up, when that is something only the
+  /// academy can grant.
+  ///
+  /// Registration offers Student, Parent, Coach and Staff. The first two are
+  /// granted immediately. The other two would hand a stranger the roster, fees or
+  /// academy revenue, so they are recorded here instead: the account is created
+  /// as a deactivated STUDENT, and staff approve it by setting the real `role`
+  /// and reactivating. Login already filters on `isActive`, so nothing is
+  /// reachable in the meantime.
+  ///
+  /// Null means nothing was requested — the ordinary case.
+  requestedRole Role?
+
   /// Set when the identity fields were scrubbed under a DPDPA erasure request.
   /// Erasure is an UPDATE, not a DELETE: financial records (Payment/Invoice) must
   /// survive for statutory retention and still point at this row.
@@ -149,6 +164,8 @@ model User {
 
   @@index([role])
   @@index([isActive])
+  /// Staff review the pending queue by this.
+  @@index([requestedRole])
 }
 
 model UserSession {
@@ -198,6 +215,16 @@ model ParentStudent {
 model StudentProfile {
   id           String   @id @default(cuid())
   userId       String   @unique
+  /// Shown to the student, given to their parent, entered at registration.
+  ///
+  /// A parent must supply this AND the student's username to sign up, which is
+  /// what stops anyone from registering as a stranger's parent and reading a
+  /// child's attendance, reports and fees. Deliberately reusable rather than
+  /// single-use — most children have two parents — and the student can regenerate
+  /// it, which invalidates the old one.
+  ///
+  /// Null until first viewed; generated lazily so existing rows need no backfill.
+  parentCode   String?  @unique
   dateOfBirth  DateTime?
   school       String?
   city         String?
@@ -773,4 +800,44 @@ model GameAnnotation {
   @@unique([gameId, coachId, ply])
   @@index([gameId, ply])
   @@map("game_annotations")
+}
+
+/// A single-use code that lets someone register as a coach or academy staff.
+///
+/// Registration offers those two roles in its dropdown, but choosing one is not
+/// enough — a code issued by the academy head must be presented with it. Without
+/// this, a public form hands any visitor the student roster, attendance and fee
+/// records, which is exactly what it looked like before this existed.
+///
+/// Single use is enforced at the database level, not by a read-then-write: the
+/// consuming update is conditional on `usedAt` still being null, so two people
+/// racing the same code produce one success and one rejection rather than two
+/// staff accounts.
+///
+/// Codes are never deleted once used — who was invited as what, by whom, and
+/// when they redeemed it, is exactly the sort of thing an academy needs to be
+/// able to answer later.
+model InviteCode {
+  id          String    @id @default(cuid())
+  /// The string handed to the invitee, e.g. KCA-7F3K-92QD.
+  code        String    @unique
+  /// Which role redeeming this grants. COACH or HR only.
+  role        Role
+  /// Free text for the issuer's own memory — "for Priya, joining in October".
+  note        String?
+  createdById String
+  createdBy   User      @relation("InviteCodesCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  /// Null until redeemed. Unique so one account cannot consume two codes.
+  usedById    String?   @unique
+  usedBy      User?     @relation("InviteCodeUsed", fields: [usedById], references: [id], onDelete: SetNull)
+  usedAt      DateTime?
+  /// Null means it does not expire.
+  expiresAt   DateTime?
+  /// Set when the head withdraws an unused code.
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([usedAt, createdAt])
+  @@index([role])
+  @@map("invite_codes")
 }

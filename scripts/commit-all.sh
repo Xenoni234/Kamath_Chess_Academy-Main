@@ -111,6 +111,7 @@ stage prisma/schema.prisma package.json package-lock.json
 do_commit "chore(db): schema for attendance, fees, consent, invoicing and annotations"
 
 stage src/lib/portals.ts "src/app/(auth)/login" src/components/auth/LoginForm.tsx \
+      src/components/auth/AuthShell.tsx \
       src/proxy.ts src/components/dashboard/DashboardSidebar.tsx \
       "src/app/(dashboard)/dashboard/student/page.tsx" \
       "src/app/(dashboard)/dashboard/parent/page.tsx" \
