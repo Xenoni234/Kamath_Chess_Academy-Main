@@ -3,6 +3,7 @@ import { getQueueConnection, queueEnabled } from "./connection";
 import { runReportJob, type ReportJobData } from "@/lib/reports/runReportJob";
 import { runProfileJob } from "@/lib/second/runProfileJob";
 import { runOpeningJob } from "@/lib/opening/runOpeningJob";
+import { runInvoiceJob, type InvoiceJobData } from "@/lib/payments/runInvoiceJob";
 import type { ProfileJobData } from "@/lib/second/types";
 import type { OpeningJobData } from "@/lib/opening/types";
 
@@ -89,4 +90,35 @@ export async function enqueueOpening(data: OpeningJobData): Promise<void> {
     return;
   }
   setImmediate(() => void runOpeningJob(data));
+}
+
+let invoiceQueue: Queue | null = null;
+
+function getInvoiceQueue(): Queue | null {
+  if (!queueEnabled()) return null;
+  if (!invoiceQueue) {
+    invoiceQueue = new Queue(INVOICE_QUEUE, { connection: bullmqConnection() });
+  }
+  return invoiceQueue;
+}
+
+/**
+ * Enqueue invoice generation for a completed payment. Same durable-or-inline
+ * contract as the other queues.
+ *
+ * `jobId` is the payment id, so BullMQ itself de-duplicates: two settlement paths
+ * (or a retried gateway webhook) firing for one payment enqueue one job, not two.
+ * `runInvoiceJob` is idempotent regardless — this just avoids the wasted work.
+ */
+export async function enqueueInvoice(data: InvoiceJobData): Promise<void> {
+  const queue = getInvoiceQueue();
+  if (queue) {
+    await queue.add("generate", data, {
+      jobId: `invoice:${data.paymentId}`,
+      removeOnComplete: true,
+      removeOnFail: 50,
+    });
+    return;
+  }
+  setImmediate(() => void runInvoiceJob(data));
 }
