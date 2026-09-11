@@ -63,13 +63,17 @@ async function submit(ip: string, message: string) {
 async function main() {
   await cleanup();
 
-  // A unique IP per run so a previous run's counter can't poison this one.
-  const ip = `203.0.113.${Math.floor(Math.random() * 250) + 1}`;
+  // A unique IP per run. Random-in-250 collided across back-to-back runs and the
+  // hour-long counter from the previous one then failed this one — a flaky test
+  // that looked like a broken rate limiter. Derived from the clock instead, in
+  // the TEST-NET-1 range reserved for exactly this.
+  const stamp = Date.now();
+  const uniqueIp = `198.18.${Math.floor(stamp / 1000) % 254}.${stamp % 254}`;
 
   console.log("1. Enquiries are stored and rate limited per IP");
   const statuses: number[] = [];
   for (let i = 1; i <= 6; i++) {
-    statuses.push(await submit(ip, `${TAG} enquiry number ${i} about coaching`));
+    statuses.push(await submit(uniqueIp, `${TAG} enquiry number ${i} about coaching`));
   }
   check("the first five are accepted", statuses.slice(0, 5).every((s) => s === 200),
     statuses.join(","));

@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import { pristineFetch } from "@/lib/pristineFetch";
 import path from "node:path";
 import { launchBrowser } from "@/lib/pdf/launch";
-import { Resend } from "resend";
 import { db } from "@/lib/db";
+import { sendEmail } from "@/lib/email";
 import { generateGameReportNarrative, type GameReportStats } from "@/lib/claude";
 import {
   REPORT_BUDGET,
@@ -27,7 +27,6 @@ export type ReportJobData = {
   chesscomId?: string;
 };
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 /** Fetch a little more than we analyse — some games will not parse. */
 const FETCH_LIMIT = 50;
@@ -194,15 +193,17 @@ export async function runReportJob(data: ReportJobData): Promise<void> {
     const pdfPath = path.join("/tmp", `report-${reportId}.pdf`);
     await fs.writeFile(pdfPath, pdfBuffer);
 
-    const emailFrom = process.env.EMAIL_FROM;
-    if (emailFrom) {
-      await resend.emails.send({
-        from: emailFrom,
-        to: userEmail,
-        subject: "Your KCA Game Report is ready",
-        html: "<p>Your game report is attached.</p>",
-        attachments: [{ filename: "report.pdf", content: pdfBuffer }],
-      });
+    const emailed = await sendEmail({
+      to: userEmail,
+      subject: "Your KCA Game Report is ready",
+      html: "<p>Your game report is attached.</p>",
+      attachments: [{ filename: "report.pdf", content: pdfBuffer }],
+    });
+    // The report row and its PDF stand regardless; only the delivery failed.
+    // `emailSentAt` below now reflects whether it ACTUALLY sent rather than
+    // whether EMAIL_FROM happened to be configured.
+    if (!emailed.sent) {
+      console.warn(`[report] ${reportId} generated but not emailed: ${emailed.error}`);
     }
 
     await db.gameReport.update({
@@ -211,7 +212,7 @@ export async function runReportJob(data: ReportJobData): Promise<void> {
         status: "complete",
         gamesAnalyzed,
         pdfUrl: pdfPath,
-        emailSentAt: emailFrom ? new Date() : null,
+        emailSentAt: emailed.sent ? new Date() : null,
         summary: narrative,
       },
     });
