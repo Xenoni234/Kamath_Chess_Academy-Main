@@ -12,8 +12,20 @@ const MAX_PER_EMAIL_HOUR = 3;
  * Per client IP, per hour. The email limit alone is keyed on an attacker-supplied
  * value, so one client could walk a list of addresses and send each of them three
  * real emails — an email-bombing and Resend-quota vector.
+ *
+ * **Why this is 30 and not 10.** An IP is a poor proxy for a person here. Indian
+ * mobile carriers run CGNAT, so a class of students "each on their own phone" can
+ * still share one public address; so can everyone on the academy's WiFi. At 10 the
+ * eleventh student is refused for something no one did wrong, and the failure
+ * reads as "the site is broken" on the day it matters.
+ *
+ * The anti-harassment control is `MAX_PER_EMAIL_HOUR`, which is keyed to the
+ * actual victim's address and stays at 3. This one only shapes bulk enumeration,
+ * and 30/hour still makes walking a list of addresses slow and obvious.
+ *
+ * `OTP_MAX_PER_IP_HOUR` raises it further for a launch or a large intake session.
  */
-const MAX_PER_IP_HOUR = 10;
+const MAX_PER_IP_HOUR = Number(process.env.OTP_MAX_PER_IP_HOUR) || 30;
 
 function clientIp(request: NextRequest): string {
   const forwarded = request.headers.get("x-forwarded-for");
