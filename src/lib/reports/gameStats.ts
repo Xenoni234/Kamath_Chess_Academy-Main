@@ -13,19 +13,36 @@ import { averageAccuracy } from "@/lib/engine/classify";
 import type { GameReportStats } from "@/lib/claude";
 
 /**
- * Budget. Depth 12 costs roughly 70 ms per position on the lite build, so the
- * ceiling below lands around two minutes of engine time. The job is
- * fire-and-forget (no queue until Phase 3), so it must stay bounded.
+ * Budget.
+ *
+ * `maxGames` was 20, which is why a student with 70 games in four days got a report
+ * covering 19 of them and a "Most played openings" table where every row said "1 game".
+ * A report built from one game per opening cannot tell anyone anything: a 0% win rate
+ * over a single game is noise being printed as a finding.
+ *
+ * MEASURED, not estimated (scripts/measureReportBudget.ts): depth 12 costs **23 ms per
+ * position** on one engine with threads 2. Note `analyzePositions` is deliberately serial
+ * on a SINGLE engine — unlike the dossier scan it does not fan out across
+ * `ENGINE_CONCURRENCY` — so that figure is the real code path, not a best case. The
+ * production box is a 2-vCPU VPS and runs perhaps 5-8x slower per core, which puts
+ * 60 games (~2000 positions) at roughly 4-6 minutes of engine time.
+ *
+ * `totalTimeoutMs` is therefore 15 minutes: well clear of that estimate, because
+ * exhausting the budget is SILENT in the only way that matters here — `analyzePositions`
+ * returns a short array, the games past the cut are skipped, and the report simply
+ * reports fewer games than the student has. Honest, but it is the exact complaint.
+ *
+ * Raising `maxGames` further means re-measuring on the VPS first. Do not guess it up.
  */
 export const REPORT_BUDGET = {
-  maxGames: 20,
+  maxGames: 60,
   depth: 12,
   threads: 2,
   /** Opening moves are book; scoring them punishes theory the player knows. */
   bookPlies: 8,
-  maxPositions: 1500,
+  maxPositions: 2400,
   maxPliesPerGame: 120,
-  totalTimeoutMs: 8 * 60 * 1000,
+  totalTimeoutMs: 15 * 60 * 1000,
 };
 
 export type NormalisedGame = {
