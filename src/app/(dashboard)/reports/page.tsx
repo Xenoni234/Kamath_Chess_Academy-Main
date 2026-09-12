@@ -18,8 +18,30 @@ type Report = {
 };
 
 const POLL_INTERVAL_MS = 3000;
-/** Reports take minutes (engine analysis + PDF + email); give up well after. */
-const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
+ * Must outlast the JOB, not merely "minutes". The engine budget alone is 15 minutes
+ * (REPORT_BUDGET.totalTimeoutMs) and the narrative and PDF come after it, so a 15-minute
+ * poll timeout could stop updating while the report was still being built — the page would
+ * sit on "Analysing" forever and a finished report would only appear on a reload. That is
+ * the same mismatch already fixed on the dossier page; keep this comfortably above the job.
+ */
+const POLL_TIMEOUT_MS = 25 * 60 * 1000;
+
+/**
+ * What a report actually costs on the 2-vCPU production box. Two engine passes: the
+ * accuracy pass over up to 60 games (serial, one engine, ~5 min) and then the deep
+ * self-profile — the same stages the opponent dossier runs, over both colours (~3 min).
+ * Quoted as a range so a slower run does not read as a fault.
+ */
+const TYPICAL_BUILD_LABEL = "usually 8-12 minutes";
+
+/** "42s", "3m 05s" — how long this report has been building. */
+function elapsedLabel(startIso: string, nowMs: number) {
+  const seconds = Math.max(0, Math.round((nowMs - new Date(startIso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
 
 const STATUS_STYLES: Record<ReportStatus, string> = {
   pending: "bg-kca-gray-600/20 text-kca-gray-100 border border-kca-gray-600/30",
@@ -47,6 +69,10 @@ export default function ReportsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Ticks once a second so the elapsed time on a building report actually moves — the
+  // three-second poll alone made it jump. Stops entirely when nothing is building, so an
+  // idle list is not re-rendering forever.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartedAtRef = useRef<number>(0);
 
@@ -119,6 +145,16 @@ export default function ReportsPage() {
   }, [reports, startPolling, stopPolling]);
 
   useEffect(() => stopPolling, [stopPolling]);
+
+  // Drive the elapsed clock only while something is actually building.
+  const isBuilding = reports.some(
+    (report) => report.status === "pending" || report.status === "processing",
+  );
+  useEffect(() => {
+    if (!isBuilding) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isBuilding]);
 
   const handleGenerate = async () => {
     const lichess = lichessId.trim();
@@ -251,6 +287,11 @@ export default function ReportsPage() {
                       )}
                       {STATUS_LABELS[report.status]}
                     </span>
+                    {(report.status === "pending" || report.status === "processing") && (
+                      <p className="mt-1.5 text-[11px] text-kca-gray-400">
+                        {elapsedLabel(report.createdAt, nowMs)} · {TYPICAL_BUILD_LABEL}
+                      </p>
+                    )}
                     {report.status === "failed" && report.summary && (
                       <p className="mt-1.5 text-[11px] text-kca-gray-400 max-w-[240px]">
                         {report.summary}
@@ -381,7 +422,10 @@ export default function ReportsPage() {
             />
 
             <p className="text-[11px] text-kca-gray-600 mb-4">
-              At least one is required. Analysis takes a few minutes — you can leave this page.
+              At least one is required. We look at up to 60 of your recent games and work out
+              your strengths and weaknesses as White and as Black, which takes{" "}
+              {TYPICAL_BUILD_LABEL.replace("usually ", "")} — you can leave this page and we will
+              tell you when it is ready.
             </p>
 
             {formError && (
