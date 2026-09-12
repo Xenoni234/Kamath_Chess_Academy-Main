@@ -23,6 +23,28 @@ import type { WeightedGame } from "@/lib/second/types";
  */
 export const SCAN_MAX_GAMES = 200;
 
+/**
+ * How many games this HOST can actually finish, which is not the same question.
+ *
+ * The deep pass is the binding constraint and its budget is wall-clock, so on a
+ * small box the ceiling above is a number the machine cannot reach. Measured in
+ * production on 2 vCPUs (ENGINE_CONCURRENCY 1): the depth-18 confirmation runs
+ * at ~1.9 moves/second and a game yields ~17 candidate moves, so one core clears
+ * roughly 39 games inside DEEP_TIMEOUT_MS. The 35 below leaves about 10%
+ * headroom, because sitting exactly on the line means a slightly slower run
+ * trims moves again.
+ *
+ * Trimming here rather than letting the budget trim mid-pass matters for more
+ * than speed. `scanned` is sorted newest-first, so an exhausted deep pass
+ * confirms the recent games and abandons the old ones — leaving `games` claiming
+ * 96 games while `moves` only covered the newest 40. Every rate computed against
+ * that games list then carries a denominator its numerator never saw. Choosing
+ * the count up front keeps the two halves describing the same games.
+ */
+function scanGameBudget(): number {
+  return Math.min(SCAN_MAX_GAMES, Math.max(20, ENGINE_CONCURRENCY * 35));
+}
+
 /** Skip the opening: weakness.ts covers it, and it is mostly memorised anyway. */
 const MIN_PLY = 16;
 /** Guard the position budget against a handful of enormous games. */
@@ -67,6 +89,14 @@ export type ScanResult = {
   games: WeightedGame[];
   moves: GradedMove[];
   positionsEvaluated: number;
+  /**
+   * Moves that differed from the shallow best but never got their depth-18
+   * confirmation, because the deep pass ran out of budget. They are DROPPED
+   * from `moves`, not graded at depth 12 — see the comment at the deep pass.
+   * Surfaced so a caller can say how much evidence was unavailable instead of
+   * quietly reporting a thinner profile as a complete one.
+   */
+  unconfirmed: number;
 };
 
 /**
@@ -105,7 +135,7 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
   const scanned = games
     .filter((g) => g.color === color)
     .sort((a, b) => b.playedAt.getTime() - a.playedAt.getTime())
-    .slice(0, SCAN_MAX_GAMES);
+    .slice(0, scanGameBudget());
 
   type Pending = {
     gameIndex: number;
@@ -144,7 +174,7 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
   }
 
   if (pending.length === 0) {
-    return { games: scanned, moves: [], positionsEvaluated: 0 };
+    return { games: scanned, moves: [], positionsEvaluated: 0, unconfirmed: 0 };
   }
 
   // One pool worker per move, searching both sides of it, so the pair always
@@ -182,13 +212,33 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
     if (score) deepByPending.set(pendingIndex, score);
   });
 
+  const needsDeep = new Set(deepIndices);
+
   const moves: GradedMove[] = [];
+  let unconfirmed = 0;
   for (let i = 0; i < pending.length; i += 1) {
     const before = scores[i]?.before;
     const after = scores[i]?.after;
     if (!before || !after) continue; // budget ran out mid-batch
 
     const deep = deepByPending.get(i);
+
+    // A move that differed from the shallow best and did NOT get its depth-18
+    // confirmation is dropped, not graded at depth 12.
+    //
+    // This used to fall through to `(deep ?? before)`, which contradicted the
+    // reason the deep pass exists: a depth-12 preference is not firm enough to
+    // call a move a mistake. Measured in production on a 2-vCPU host, the deep
+    // pass exhausted its budget after 682 of 1677 moves, so 59% of the dossier's
+    // mistakes — and the "you should have played X" behind every tactical motif
+    // — rested on exactly the evidence the design rejects, with nothing marking
+    // them. A smaller profile built only from confirmed verdicts is worth more
+    // than a fuller one that cannot support its own claims.
+    if (!deep && needsDeep.has(i)) {
+      unconfirmed += 1;
+      continue;
+    }
+
     const cpBeforeWhite = scoreToCentipawns((deep ?? before).cp, (deep ?? before).mate);
     const cpAfterWhite = scoreToCentipawns(after.cp, after.mate);
 
@@ -213,9 +263,17 @@ export async function scanGames(games: WeightedGame[], color: "w" | "b"): Promis
     });
   }
 
+  if (unconfirmed > 0) {
+    console.warn(
+      `[second] ${unconfirmed} of ${deepIndices.length} candidate mistakes could not be ` +
+        `deep-confirmed and were excluded from the profile`,
+    );
+  }
+
   return {
     games: scanned,
     moves,
     positionsEvaluated: pending.length * 2 + deepIndices.length,
+    unconfirmed,
   };
 }
