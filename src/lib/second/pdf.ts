@@ -6,6 +6,7 @@
  * per-instance, so the download route may legitimately 404 for older dossiers.
  */
 import { launchBrowser } from "@/lib/pdf/launch";
+import { markdownToHtml, MARKDOWN_PDF_CSS } from "@/lib/markdown/toHtml";
 import { SOURCE_LABEL } from "@/lib/second/types";
 import type { ProfileArtifact, RepertoireLine } from "@/lib/second/types";
 
@@ -207,6 +208,7 @@ export function renderDossierHtml(
     .tag { display: inline-block; background: #111827; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 10px; text-transform: uppercase; }
     ol { padding-left: 18px; } li { margin-bottom: 10px; }
     .footnote { margin-top: 26px; font-size: 10px; color: #6b7280; }
+    ${MARKDOWN_PDF_CSS}
   </style>
 </head>
 <body>
@@ -219,11 +221,7 @@ export function renderDossierHtml(
   <div class="metric"><strong>${artifact.transpositions.length}</strong>Transpositions</div>
 
   <h2>Briefing</h2>
-  ${narrative
-    .split("\n")
-    .filter(Boolean)
-    .map((p) => `<p>${htmlEscape(p)}</p>`)
-    .join("")}
+  <div class="narrative">${markdownToHtml(narrative)}</div>
 
   <h2>Recommended repertoire</h2>
   <ol>${lineItems}</ol>

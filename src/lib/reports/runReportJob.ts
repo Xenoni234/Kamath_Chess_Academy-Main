@@ -1,5 +1,8 @@
 import { pristineFetch } from "@/lib/pristineFetch";
 import { launchBrowser } from "@/lib/pdf/launch";
+import { createNotification } from "@/lib/notify";
+import { markdownToHtml, MARKDOWN_PDF_CSS } from "@/lib/markdown/toHtml";
+import { buildSelfProfile, describeSelfProfile } from "@/lib/reports/selfProfile";
 import { db } from "@/lib/db";
 import { generateGameReportNarrative, type GameReportStats } from "@/lib/claude";
 import {
@@ -26,7 +29,10 @@ export type ReportJobData = {
 
 
 /** Fetch a little more than we analyse — some games will not parse. */
-const FETCH_LIMIT = 50;
+// Must exceed REPORT_BUDGET.maxGames, or the cap that actually binds is this one and
+// raising maxGames does nothing. Games are returned newest-first (Lichess `max=`) and
+// newest-last (Chess.com archives, hence the negative slice below).
+const FETCH_LIMIT = 120;
 
 function htmlEscape(value: string) {
   return value.replace(/[&<>"']/g, (char) => {
@@ -99,6 +105,7 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
     th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
     th { background: #f3f4f6; }
     .footnote { margin-top: 28px; font-size: 11px; color: #6b7280; }
+    ${MARKDOWN_PDF_CSS}
   </style>
 </head>
 <body>
@@ -107,11 +114,7 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
   <div class="metric"><strong>${stats.overallAccuracy.toFixed(1)}%</strong>Overall accuracy</div>
   <div class="metric"><strong>${stats.blunderRate.toFixed(1)}%</strong>Blunder rate</div>
   <div class="metric"><strong>${stats.movesAnalyzed}</strong>Moves analysed</div>
-  ${narrative
-    .split("\n")
-    .filter(Boolean)
-    .map((paragraph) => `<p>${htmlEscape(paragraph)}</p>`)
-    .join("")}
+  <div class="narrative">${markdownToHtml(narrative)}</div>
   <h2>Accuracy by phase</h2>
   <table>
     <thead><tr><th>Opening</th><th>Middlegame</th><th>Endgame</th></tr></thead>
@@ -174,6 +177,27 @@ export async function runReportJob(data: ReportJobData): Promise<void> {
       return;
     }
 
+    // Deep self-profile: the same engine stages the opponent dossier runs, pointed at the
+    // student's own games. This is the difference between "you scored 87.6%" and "here is
+    // what you are actually weak at", which is the whole point of a report.
+    //
+    // Wrapped so it can only ever ADD. It needs a public handle, a second ingest and a
+    // long engine pass, and any of those can fail — when they do the student still gets
+    // the report they got before, and the narrative is told the section is missing rather
+    // than being allowed to imply there was nothing to find.
+    const profileHandle = lichessId ?? chesscomId;
+    if (profileHandle) {
+      try {
+        const profile = await buildSelfProfile(
+          profileHandle,
+          lichessId ? "LICHESS" : "CHESSCOM",
+        );
+        if (profile) stats.selfProfile = describeSelfProfile(profile);
+      } catch (error) {
+        console.error("[report] self-profile failed; continuing without it:", error);
+      }
+    }
+
     const narrative = await generateGameReportNarrative(stats);
 
     const browser = await launchBrowser();
@@ -202,8 +226,28 @@ export async function runReportJob(data: ReportJobData): Promise<void> {
         summary: narrative,
       },
     });
+
+    // The email USED to be how a student found out the report existed. Removing it left
+    // nothing at all: the reports page only learns the job finished while it is open and
+    // polling, so anyone who navigated away was never told. The bell is the replacement,
+    // and it is the same one the dossier job already rings.
+    await createNotification({
+      userId,
+      type: "SYSTEM",
+      title: "Your game report is ready",
+      body: `We looked at ${gamesAnalyzed} of your games. Open Reports to read it.`,
+    }).catch(() => {});
   } catch (error) {
     console.error("Report generation failed:", error);
     await db.gameReport.update({ where: { id: reportId }, data: { status: "failed" } });
+
+    // A silent failure is worse than a visible one: without this the row sits on "failed"
+    // and the student waits for something that is never coming.
+    await createNotification({
+      userId,
+      type: "SYSTEM",
+      title: "We could not finish your report",
+      body: "Something went wrong while looking at your games. Please try making it again.",
+    }).catch(() => {});
   }
 }

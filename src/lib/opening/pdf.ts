@@ -5,6 +5,7 @@
  * (regenerating restores it).
  */
 import { launchBrowser } from "@/lib/pdf/launch";
+import { markdownToHtml, MARKDOWN_PDF_CSS } from "@/lib/markdown/toHtml";
 import type { OpeningArtifact, RepertoireLine } from "./types";
 
 function htmlEscape(value: string) {
@@ -27,10 +28,7 @@ export function renderOpeningHtml(
   guide: string,
 ): string {
   const title = `${artifact.name}${artifact.eco ? ` (${artifact.eco})` : ""}`;
-  const guideParas = guide
-    .split(/\n\n+/)
-    .map((p) => `<p>${htmlEscape(p).replace(/\n/g, "<br/>")}</p>`)
-    .join("\n");
+  const guideParas = `<div class="narrative">${markdownToHtml(guide)}</div>`;
 
   const variations = artifact.variations
     .map((v, i) => {
@@ -71,6 +69,7 @@ export function renderOpeningHtml(
     .tag.gambit { background: #fff3e0; color: #b45309; }
     .tag.trap { background: #fde8e8; color: #b91c1c; }
     .tag.best { background: #00838f; color: #fff; }
+    ${MARKDOWN_PDF_CSS}
   </style></head><body>
     <h1>${htmlEscape(title)}</h1>
     <div class="sub">Repertoire for ${artifact.colorToPlay} · ${artifact.variations.length} variations · generated ${new Date(artifact.generatedAt).toLocaleDateString()}</div>
