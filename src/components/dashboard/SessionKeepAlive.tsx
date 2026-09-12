@@ -31,20 +31,39 @@ const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
  */
 const MIN_GAP_MS = 60 * 1000;
 
+/**
+ * Shared across mounts, deliberately. The interval was anchored to MOUNT time while the
+ * token's 15 minutes run from ISSUE time, so navigating to a page when the cookie was
+ * already 6+ minutes old left a window where it expired BEFORE the first refresh fired —
+ * and nothing recovered, because "no refresh on mount" was the rule.
+ *
+ * That window was harmless while every page finished its work in seconds. A game report
+ * now polls for a quarter of an hour, which crosses it almost every time: the student sees
+ * a red "Unauthorized" appear over a report that is building perfectly well.
+ *
+ * So refresh on mount too, and keep the last refresh time at module scope so moving
+ * between dashboard pages does not turn that into a burst on every navigation.
+ */
+let lastRefreshAt = 0;
+
 export default function SessionKeepAlive() {
   useEffect(() => {
-    let last = Date.now();
+    let last = lastRefreshAt;
 
     const refresh = () => {
       last = Date.now();
+      lastRefreshAt = last;
       void fetch("/api/auth/refresh", { method: "POST" }).catch(() => {
         // Offline or the refresh token has genuinely expired — the next
         // navigation redirects to /login, which is the right answer.
       });
     };
 
-    // No refresh on mount: the token was just minted or is still valid, and a
-    // burst of refreshes on every navigation would be pointless load.
+    // Refresh on mount unless another page did so moments ago. The client cannot read an
+    // httpOnly cookie's age, so it cannot know whether the token has 14 minutes left or
+    // 30 seconds — assuming the optimistic case is exactly what produced the bug above.
+    if (Date.now() - lastRefreshAt >= MIN_GAP_MS) refresh();
+
     const id = setInterval(refresh, REFRESH_INTERVAL_MS);
 
     const onWake = () => {

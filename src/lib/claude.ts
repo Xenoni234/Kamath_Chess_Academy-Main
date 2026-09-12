@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { pristineFetch } from "@/lib/pristineFetch";
+import { MIN_OPENING_GAMES } from "@/lib/reports/gameStats";
 import type { MoveFacts } from "@/lib/analysis/moveFacts";
 
 /**
@@ -61,8 +62,15 @@ export type GameReportStats = {
   openingAccuracy: number;
   middlegameAccuracy: number;
   endgameAccuracy: number;
-  topOpenings: Array<{ name: string; winRate: number; count: number }>;
-  weakestOpenings: Array<{ name: string; accuracy: number }>;
+  /**
+   * Grouped by opening FAMILY, not by exact move order — see `openingFamily`.
+   * `winRate` is a SCORE percentage (win 1, draw ½), and it is **null below
+   * MIN_OPENING_GAMES**: a rate from one game is not a finding, and printing it
+   * as one is how "you have a 100% win rate in the Closed Sicilian" reached a
+   * child who had played it once.
+   */
+  topOpenings: Array<{ name: string; winRate: number | null; count: number }>;
+  weakestOpenings: Array<{ name: string; accuracy: number; count: number }>;
   tacticalPatternsMissed: string[];
   /**
    * Deep self-profile, already rendered to prompt text by
@@ -255,8 +263,8 @@ Inaccuracy rate: ${stats.inaccuracyRate}% of moves
 Opening accuracy: ${stats.openingAccuracy}%
 Middlegame accuracy: ${stats.middlegameAccuracy}%
 Endgame accuracy: ${stats.endgameAccuracy}%
-Top openings: ${JSON.stringify(stats.topOpenings)}
-Weakest openings: ${JSON.stringify(stats.weakestOpenings)}
+Openings they play most (grouped by family; "winRate" is a SCORE out of 100 where a draw counts a half. A null winRate means we deliberately withheld it because fewer than ${MIN_OPENING_GAMES} games is not enough to state a rate — say "not enough games yet" and NEVER estimate or infer a percentage for those): ${JSON.stringify(stats.topOpenings)}
+Openings where they score lowest on accuracy (only families with at least ${MIN_OPENING_GAMES} games appear here at all): ${JSON.stringify(stats.weakestOpenings)}
 Recurring problems behind their blunders: ${stats.tacticalPatternsMissed.join(", ") || "none clearly identified — say so rather than guessing"}${profileBlock}`;
 }
 
