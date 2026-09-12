@@ -117,8 +117,15 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
     setExplanation("");
   }
 
-  async function explainCurrent() {
-    if (safePly < 1 || !currentLine) return;
+  /**
+   * Explain the move that LANDS on `atPly`.
+   *
+   * Takes the ply explicitly rather than reading `safePly`, because the button
+   * below advances the board and explains in the same click — and `setPly` has
+   * not been applied yet at that point.
+   */
+  async function explainCurrent(atPly: number = safePly) {
+    if (atPly < 1 || !currentLine) return;
     setExplaining(true);
     setExplanation("");
     try {
@@ -131,8 +138,8 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
         // evaluation from the END of the whole variation, and an empty
         // alternatives list — so every specific claim was invented.)
         body: JSON.stringify({
-          fen: fens[safePly - 1],
-          playedUci: ucis[safePly - 1],
+          fen: fens[atPly - 1],
+          playedUci: ucis[atPly - 1],
         }),
       });
       if (!res.ok || !res.body) {
@@ -420,16 +427,36 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
               </p>
             )}
 
+            {/*
+              At the start of a line this button used to be `disabled` while
+              still wearing `btn-primary` — full-brightness cyan, indistinguishable
+              from a live button, with a label that reads as an instruction. A real
+              user clicked it, nothing happened, and reported the click as broken.
+              They were right: a control that looks pressable and does nothing IS
+              broken, whatever the `disabled` attribute says.
+
+              So it now does the thing its label describes. From the start it
+              advances to the first move and explains that; anywhere else it
+              explains the move just played. It is only ever disabled while a
+              request is actually in flight, and then it says so.
+            */}
             <button
               type="button"
               className="btn-primary w-full py-2.5"
-              disabled={safePly < 1 || explaining}
-              onClick={explainCurrent}
+              disabled={explaining || maxPly < 1}
+              onClick={() => {
+                if (safePly < 1) {
+                  setPly(1);
+                  void explainCurrent(1);
+                } else {
+                  void explainCurrent(safePly);
+                }
+              }}
             >
               {explaining
                 ? "Explaining…"
                 : safePly < 1
-                  ? "Step forward to explain a move"
+                  ? `Play ${moves[0] ?? "the first move"} and explain it`
                   : `Explain ${moves[safePly - 1] ?? ""}`}
             </button>
 

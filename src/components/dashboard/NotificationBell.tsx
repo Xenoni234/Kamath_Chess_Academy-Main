@@ -19,6 +19,43 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Where to draw the panel, in viewport coordinates.
+   *
+   * The panel has to be `fixed`, not `absolute`. The sidebar it lives in is
+   * `md:overflow-hidden` (so the logo and Logout stay put while only the nav
+   * list scrolls), and an absolutely-positioned child is clipped by that — the
+   * panel was being cut off mid-list, which is what a real user reported.
+   * `fixed` escapes the clip, at the cost of having to measure the button.
+   */
+  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
+
+  const place = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const PANEL = 288; // w-72
+    const GAP = 8;
+    setAnchor({
+      // Keep it on screen on a narrow phone, where the sidebar is full width.
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - PANEL - 8)),
+      top: rect.bottom + GAP,
+    });
+  };
+
+  // Re-measure while open: the page behind can scroll, and the window can resize.
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onMove = () => place();
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     // `cancelled` stops a poll that resolves after unmount from setting state.
@@ -82,7 +119,11 @@ export default function NotificationBell() {
     <div className="relative" ref={wrapRef}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        ref={buttonRef}
+        onClick={() => {
+          place();
+          setOpen((o) => !o);
+        }}
         aria-label="Notifications"
         className="flex w-full items-center gap-3 rounded-lg border border-kca-border px-4 py-2.5 text-sm font-semibold text-kca-gray-400 transition-colors hover:bg-kca-surface-2 hover:text-kca-white"
       >
@@ -96,7 +137,20 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-2 max-h-96 w-72 overflow-y-auto rounded-xl border border-kca-border bg-kca-surface shadow-cyan-md">
+        <div
+          style={
+            anchor
+              ? {
+                  left: anchor.left,
+                  top: anchor.top,
+                  // Never taller than the room below the button, so the list
+                  // scrolls inside the panel instead of running off the screen.
+                  maxHeight: Math.max(160, window.innerHeight - anchor.top - 16),
+                }
+              : undefined
+          }
+          className="fixed z-[60] w-72 overflow-y-auto rounded-xl border border-kca-border bg-kca-surface shadow-cyan-md"
+        >
           <div className="sticky top-0 flex items-center justify-between border-b border-kca-border bg-kca-surface px-4 py-2.5">
             <span className="text-xs font-bold uppercase tracking-wider text-kca-gray-400">Notifications</span>
             {unread > 0 && (

@@ -20,6 +20,7 @@ export default function Navbar() {
   ];
 
   return (
+    <>
     <header className="sticky top-0 z-50 w-full border-b border-kca-border bg-kca-black/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 md:px-8">
         {/* Logo */}
@@ -71,7 +72,26 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile Slide-in Menu Overlay */}
+    </header>
+
+      {/*
+        Rendered OUTSIDE <header> on purpose, and this is a bug fix, not a
+        restyle.
+
+        The overlay is `position: fixed`, and it used to sit inside the header.
+        The header carries `backdrop-blur-md`, and a `backdrop-filter` — like
+        `filter` and `transform` — makes an element a *containing block* for its
+        fixed-position descendants. So `fixed inset-0` resolved against the
+        header's own box rather than the viewport: the panel was only as tall as
+        the header, and the whole page showed through behind the links. On a
+        phone that reads as the menu and the page printed on top of each other.
+
+        As a sibling, `fixed` resolves against the viewport again and the panel
+        covers the screen, which is what the design always intended.
+
+        `bg-kca-black/95` is kept, so the sliver of page visible through it is
+        deliberate depth rather than the layout failure it looked like.
+      */}
       {isOpen && (
         <div className="fixed inset-0 top-[73px] z-40 bg-kca-black/95 backdrop-blur-lg md:hidden">
           <div className="flex h-full flex-col p-8 space-y-6">
@@ -95,6 +115,6 @@ export default function Navbar() {
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }
