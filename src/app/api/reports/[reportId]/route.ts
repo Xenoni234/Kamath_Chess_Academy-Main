@@ -53,3 +53,45 @@ export async function GET(request: NextRequest, context: { params: Promise<{ rep
     return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
   }
 }
+
+/**
+ * Delete one of your own reports, PDF and all.
+ *
+ * Ownership is checked inside the delete itself rather than with a read-then-write: two
+ * clicks on the button would otherwise both pass the read and the second would throw on a
+ * row that no longer exists. `deleteMany` with the userId in the filter is atomic, cannot
+ * touch anyone else's row, and reports "0 deleted" instead of throwing.
+ *
+ * 404 for "not yours" as well as "not found", so report ids cannot be probed.
+ */
+export async function DELETE(request: NextRequest, context: { params: Promise<{ reportId: string }> }) {
+  const token = request.cookies.get("kca_access_token")?.value;
+
+  if (!token) {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  let payload: ReturnType<typeof verifyAccessToken>;
+  try {
+    payload = verifyAccessToken(token);
+  } catch {
+    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { reportId } = await context.params;
+
+    const { count } = await db.gameReport.deleteMany({
+      where: { id: reportId, userId: payload.userId },
+    });
+
+    if (count === 0) {
+      return NextResponse.json({ success: false, message: "Report not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("[reports/[reportId]] DELETE failed:", error);
+    return NextResponse.json({ success: false, message: "Something went wrong." }, { status: 500 });
+  }
+}

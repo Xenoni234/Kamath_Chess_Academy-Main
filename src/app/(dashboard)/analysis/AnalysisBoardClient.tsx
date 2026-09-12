@@ -60,6 +60,8 @@ export default function AnalysisBoardClient() {
   const gameId = searchParams.get("gameId");
   // Play-vs-engine hands its finished game over this way.
   const pgnParam = searchParams.get("pgn");
+  // A single position — how "Look at this position" arrives from a solved puzzle.
+  const fenParam = searchParams.get("fen");
 
   const [rootFen, setRootFen] = useState(START_FEN);
   const [nodes, setNodes] = useState<PositionNode[]>([]);
@@ -174,6 +176,35 @@ export default function AnalysisBoardClient() {
   useEffect(() => {
     if (appliedPgn) newGame();
   }, [appliedPgn, newGame]);
+
+  // ---- Entry point: a bare position ---------------------------------------
+  // Same shape as the PGN entry above: parsing is derived state, applying it happens
+  // during render so the board never shows a frame of the previous position, and only the
+  // engine reset is a real effect. chess.js throwing IS the validation.
+  const parsedFen = useMemo(() => {
+    if (!fenParam) return null;
+    try {
+      return new Chess(fenParam).fen();
+    } catch {
+      return null;
+    }
+  }, [fenParam]);
+  const fenError = fenParam && !parsedFen ? "That position could not be read." : null;
+
+  const [appliedFen, setAppliedFen] = useState<string | null>(null);
+  if (parsedFen && fenParam !== appliedFen) {
+    setAppliedFen(fenParam);
+    setRootFen(parsedFen);
+    setNodes([]);
+    setCurrentPly(0);
+    setSourceLabel("Puzzle position");
+    setAnalyses([]);
+    setLoadError(null);
+  }
+
+  useEffect(() => {
+    if (appliedFen) newGame();
+  }, [appliedFen, newGame]);
 
   // ---- Live evaluation of the position on the board -----------------------
   // Paused while the coach is generating: the AI provider may be a local model
@@ -420,9 +451,9 @@ export default function AnalysisBoardClient() {
         </p>
       </div>
 
-      {(loadError ?? pgnError) && (
+      {(loadError ?? pgnError ?? fenError) && (
         <div className="mb-4 rounded-xl border border-kca-danger/30 bg-kca-danger/10 px-4 py-3 text-sm text-kca-danger">
-          {loadError ?? pgnError}
+          {loadError ?? pgnError ?? fenError}
         </div>
       )}
 

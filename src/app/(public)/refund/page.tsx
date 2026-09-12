@@ -1,6 +1,9 @@
 import LegalDoc, { Clause } from "@/components/public/LegalDoc";
 
-export const metadata = { title: "Refund & Cancellation Policy | Kamath Chess Academy" };
+export const metadata = {
+  title: "Refund & Cancellation Policy",
+  description: "How cancellations, make-up sessions and refunds work at Kamath Chess Academy.",
+};
 
 /**
  * Refund and Cancellation Policy.

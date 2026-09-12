@@ -26,6 +26,7 @@ type Profile = {
   status: ProfileStatus;
   gamesAnalyzed: number;
   createdAt: string;
+  updatedAt?: string;
 };
 
 /** Up to this many accounts per dossier — mirrors MAX_PROFILE_ACCOUNTS in zod. */
@@ -33,8 +34,26 @@ const MAX_ACCOUNTS = 5;
 
 
 const POLL_INTERVAL_MS = 4000;
-/** Profiling runs engine analysis over many positions; allow a long window. */
-const POLL_TIMEOUT_MS = 20 * 60 * 1000;
+/**
+ * Must not be shorter than JOB_TIMEOUT_MS in runProfileJob.ts (30 min). It was 20, so a
+ * long build stopped updating on screen while it was still running perfectly well — which
+ * is indistinguishable from "it hung".
+ */
+const POLL_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * What a build actually takes on this server, measured after the scan fix:
+ * ingest 10s · weakness 8s · scan 139s · extend 44s · narrative 4s · PDF 4s ≈ 3.5 min.
+ * Quoted as a range so a slower run does not read as a fault.
+ */
+const TYPICAL_BUILD_LABEL = "usually 3-5 minutes";
+
+/** "42s", "3m 05s" — how long this dossier has been building. */
+function elapsedLabel(startIso: string, nowMs: number) {
+  const seconds = Math.max(0, Math.round((nowMs - new Date(startIso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
 
 const STATUS_STYLES: Record<ProfileStatus, string> = {
   pending: "bg-kca-gray-600/20 text-kca-gray-100 border border-kca-gray-600/30",
@@ -65,6 +84,10 @@ type PgnPreview = { accepted: PreviewGame[]; rejected: PreviewReject[]; total: n
 
 export default function SecondPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // Ticks once a second so the elapsed time on a building dossier actually moves — the
+  // four-second poll alone made it jump. Stops entirely when nothing is building, so an
+  // idle list is not re-rendering forever.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [isLoading, setIsLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -293,6 +316,14 @@ export default function SecondPage() {
     }
   }
 
+  const isBuilding = profiles.some((p) => p.status === "pending" || p.status === "processing");
+
+  useEffect(() => {
+    if (!isBuilding) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isBuilding]);
+
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -360,14 +391,21 @@ export default function SecondPage() {
                     {new Date(p.createdAt).toLocaleString()}
                   </div>
                 </div>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider",
-                    STATUS_STYLES[p.status],
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span
+                    className={cn(
+                      "rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider",
+                      STATUS_STYLES[p.status],
+                    )}
+                  >
+                    {STATUS_LABELS[p.status]}
+                  </span>
+                  {(p.status === "pending" || p.status === "processing") && (
+                    <span className="text-[10px] text-kca-gray-400">
+                      {elapsedLabel(p.createdAt, nowMs)} · {TYPICAL_BUILD_LABEL}
+                    </span>
                   )}
-                >
-                  {STATUS_LABELS[p.status]}
-                </span>
+                </div>
               </div>
             );
 

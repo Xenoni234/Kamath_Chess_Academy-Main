@@ -335,12 +335,62 @@ async function llmFetch(system: string, prompt: string, maxTokens: number, strea
   return response;
 }
 
-async function llmChat(system: string, prompt: string, maxTokens: number): Promise<string> {
+/**
+ * A completion, plus whether the model ran out of room mid-thought.
+ *
+ * `finish_reason: "length"` means the answer was CUT, not finished. Reading only
+ * `message.content` and ignoring it is how a coach's guide reached a student ending
+ * "...eroding your" — and, because the severed line was a half-written markdown table row,
+ * with raw `|` pipes on screen underneath it.
+ */
+type Completion = { text: string; truncated: boolean };
+
+async function llmChat(system: string, prompt: string, maxTokens: number): Promise<Completion> {
   const response = await llmFetch(system, prompt, maxTokens, false);
   const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
   };
-  return (data.choices?.[0]?.message?.content ?? "").trim();
+  const choice = data.choices?.[0];
+  return {
+    text: (choice?.message?.content ?? "").trim(),
+    truncated: choice?.finish_reason === "length",
+  };
+}
+
+/**
+ * Make a cut-off document end at a sensible place.
+ *
+ * A truncated answer is not wrong, it is unfinished — so the honest thing is to show the
+ * part that IS finished and stop. Drops the trailing partial line, then any trailing
+ * markdown table row (a table missing its last rows still renders; half a row does not),
+ * then backs up to the last completed sentence.
+ */
+export function endCleanly({ text, truncated }: Completion): string {
+  if (!truncated || !text) return text;
+
+  const lines = text.split("\n");
+  lines.pop(); // the line the model was in the middle of writing
+
+  while (lines.length) {
+    const last = (lines[lines.length - 1] ?? "").trim();
+    // A dangling table row, a dangling heading, or a dangling list bullet all read as
+    // damage rather than as an ending.
+    if (last === "" || last.startsWith("|") || last.startsWith("#") || /^[-*+]\s*$/.test(last)) {
+      lines.pop();
+      continue;
+    }
+    break;
+  }
+
+  let out = lines.join("\n").trimEnd();
+
+  // If the surviving text still ends mid-sentence, cut back to the last full stop.
+  if (out && !/[.!?:)\]`"']$/.test(out)) {
+    const stop = Math.max(out.lastIndexOf(". "), out.lastIndexOf(".\n"), out.lastIndexOf("!"), out.lastIndexOf("?"));
+    if (stop > out.length * 0.5) out = out.slice(0, stop + 1);
+  }
+
+  return out.trimEnd();
 }
 
 async function* llmChatStream(system: string, prompt: string, maxTokens: number): AsyncGenerator<string> {
@@ -394,7 +444,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
  */
 const OLLAMA_TIMEOUT_MS = 5 * 60 * 1000;
 
-async function ollamaChat(system: string, prompt: string, maxTokens: number): Promise<string> {
+async function ollamaChat(system: string, prompt: string, maxTokens: number): Promise<Completion> {
   const response = await pristineFetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -414,8 +464,12 @@ async function ollamaChat(system: string, prompt: string, maxTokens: number): Pr
     throw new Error(`Ollama request failed: ${response.status}`);
   }
 
-  const data = (await response.json()) as { message?: { content?: string } };
-  return (data.message?.content ?? "").trim();
+  const data = (await response.json()) as { message?: { content?: string }; done_reason?: string };
+  return {
+    text: (data.message?.content ?? "").trim(),
+    // Ollama's equivalent of finish_reason: "length".
+    truncated: data.done_reason === "length",
+  };
 }
 
 async function* ollamaChatStream(system: string, prompt: string, maxTokens: number): AsyncGenerator<string> {

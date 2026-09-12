@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { db } from "@/lib/db";
 import { generateOpponentRepertoire } from "@/lib/claude";
 import { createNotification } from "@/lib/notify";
@@ -351,14 +349,18 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
     timer.mark("AI narrative");
 
     // 8. PDF. A rendering failure must not lose the dossier itself.
-    let pdfPath: string | null = null;
+    //
+    // Kept on the row rather than in /tmp, which every redeploy wipes — that is what
+    // turned the download into "this dossier's file has expired, regenerate it", making
+    // the user pay for a ten-minute job twice to read something they already had.
+    // Uint8Array<ArrayBuffer> specifically: Prisma's Bytes will not take a Node Buffer's
+    // wider ArrayBufferLike.
+    let pdfBytes: Uint8Array<ArrayBuffer> | null = null;
     try {
-      const pdf = await renderDossierPdf(artifact, lines, narrative);
-      pdfPath = path.join("/tmp", `dossier-${profileId}.pdf`);
-      await fs.writeFile(pdfPath, pdf);
+      pdfBytes = new Uint8Array(await renderDossierPdf(artifact, lines, narrative));
     } catch (error) {
       console.error("[second] dossier PDF failed:", error);
-      pdfPath = null;
+      pdfBytes = null;
     }
 
     timer.mark("PDF");
@@ -367,7 +369,7 @@ async function runProfileJobInner(data: ProfileJobData): Promise<void> {
     await db.repertoirePlan.create({
       data: {
         profileId,
-        pdfUrl: pdfPath,
+        pdf: pdfBytes,
         summary: narrative,
         linesJson: lines as unknown as object,
       },

@@ -1,6 +1,9 @@
 import LegalDoc, { Clause } from "@/components/public/LegalDoc";
 
-export const metadata = { title: "Privacy Policy | Kamath Chess Academy" };
+export const metadata = {
+  title: "Privacy Policy",
+  description: "How Kamath Chess Academy collects, uses and protects student and parent data under India's DPDPA 2023.",
+};
 
 export default function PrivacyPage() {
   return (
