@@ -46,7 +46,11 @@ export default function GameRoomClient({
   // Game state
   const [game, setGame] = useState<GameState>(initialActiveGame || initialDbGame!);
   const [fen, setFen] = useState<string>(game.fen);
-  const [lastValidFen, setLastValidFen] = useState<string>(game.fen);
+  // A ref, not state: this is only ever read back inside the socket effect to undo a
+  // rejected move, never rendered. As state it sat in that effect's dependency array and
+  // changed on every move, so the whole effect tore down and re-ran per move — which
+  // re-emitted `game:join` and let the server's Redis state stomp the optimistic move.
+  const lastValidFenRef = useRef<string>(game.fen);
   // PGN is pushed to the server on every move but never rendered here.
   const [, setPgn] = useState<string>(game.pgn || "");
   const [status, setStatus] = useState<string>(game.status);
@@ -139,18 +143,28 @@ export default function GameRoomClient({
   useEffect(() => {
     const socket = getSocket();
 
-    // Join room
-    if (isPlayer) {
-      socket.emit("game:join", { gameId });
-    } else {
-      socket.emit("game:spectate", { gameId });
+    // A finished game lives only in Postgres — Redis drops it five minutes after the end
+    // — so there is nothing to join or spectate. Asking anyway earned a `game:error` that
+    // nothing listened for.
+    if (!initialIsFinished) {
+      if (isPlayer) {
+        socket.emit("game:join", { gameId });
+      } else {
+        socket.emit("game:spectate", { gameId });
+      }
     }
+
+    // Previously unhandled, which is why a failed join was invisible.
+    const onError = (payload: { message?: string }) => {
+      console.error("[game] server refused the room:", payload?.message ?? "unknown error");
+    };
+    socket.on("game:error", onError);
 
     // Handlers
     socket.on("game:state", (state: GameState) => {
       setGame(state);
       setFen(state.fen);
-      setLastValidFen(state.fen);
+      lastValidFenRef.current = state.fen;
       setPgn(state.pgn || "");
       setStatus(state.status);
       setResult(state.result);
@@ -162,7 +176,7 @@ export default function GameRoomClient({
     socket.on("game:update", (state: GameState) => {
       setGame(state);
       setFen(state.fen);
-      setLastValidFen(state.fen);
+      lastValidFenRef.current = state.fen;
       setPgn(state.pgn || "");
       setStatus(state.status);
       setResult(state.result);
@@ -174,7 +188,7 @@ export default function GameRoomClient({
     socket.on("game:end", (state: GameState) => {
       setGame(state);
       setFen(state.fen);
-      setLastValidFen(state.fen);
+      lastValidFenRef.current = state.fen;
       setPgn(state.pgn || "");
       setStatus(state.status);
       setResult(state.result);
@@ -203,20 +217,24 @@ export default function GameRoomClient({
       setFlashRed(true);
       setTimeout(() => setFlashRed(false), 500);
       // Revert FEN
-      if (lastValidFen) {
-        setFen(lastValidFen);
+      if (lastValidFenRef.current) {
+        setFen(lastValidFenRef.current);
       }
     });
 
     return () => {
+      // Removing by event name rather than by handler is safe here only because this
+      // component is the sole listener for these events. If another component ever listens
+      // for them, these must become `socket.off(event, handler)`.
       socket.off("game:state");
       socket.off("game:update");
       socket.off("game:end");
       socket.off("game:draw-offered");
       socket.off("game:draw-declined");
       socket.off("game:move-invalid");
+      socket.off("game:error", onError);
     };
-  }, [gameId, isPlayer, userId, lastValidFen, fetchRatingChange]);
+  }, [gameId, isPlayer, userId, initialIsFinished, fetchRatingChange]);
 
   const handleMove = (from: string, to: string, promotion?: string) => {
     if (!isOngoing || isSpectator) return;
@@ -228,7 +246,7 @@ export default function GameRoomClient({
       if (move) {
         const prevFen = fen;
         setFen(chess.fen());
-        setLastValidFen(prevFen);
+        lastValidFenRef.current = prevFen;
 
         const socket = getSocket();
         socket.emit("game:move", { gameId, from, to, promotion });
