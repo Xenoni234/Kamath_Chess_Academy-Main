@@ -369,6 +369,20 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   All Stockfish work is now ~26 s; the local Ollama narrative is the bottleneck.
   Per-stage times are logged as `[second] <stage>: Ns` — check those first before
   optimising anything here.
+- **The scan is sized to the HOST, not to `SCAN_MAX_GAMES`. Do not raise the cap
+  without re-measuring on the target machine.** Measured in production (2 vCPUs,
+  so `ENGINE_CONCURRENCY` derives to **1**, against 8 on the laptop): ingest 0.9 s ·
+  weakness+novelty 3.0 s · **scan 509 s** · extend 33.6 s · AI narrative 4.0 s ·
+  PDF 1.0 s = ~9.2 min. Groq makes the narrative a rounding error; the scan is
+  everything. The deep pass confirms ~1.9 moves/s on one core and logged
+  `budget exhausted after 682/1677 items`, so **59 % of candidate mistakes never
+  got their depth-18 confirmation** — and the code then fell back to the depth-12
+  score, which is precisely what the deep pass exists to avoid. Two fixes:
+  unconfirmed moves are now **dropped rather than graded at depth 12** (counted in
+  `ScanResult.unconfirmed`), and `scanGameBudget()` trims the game list to what
+  the pool can finish (~35 games per engine), because `scanned` is newest-first —
+  an exhausted deep pass silently left `games` claiming 96 while `moves` covered
+  only the newest 40, giving every rate a denominator its numerator never saw.
 - **The database is in Mumbai (`ap-south-1`) as of 11 Sept 2026.** It was in
   Tokyo (`ap-northeast-1`), which cost ~150 ms per round trip from India and was
   the floor under every page. Measured after the move: connect+query went from
