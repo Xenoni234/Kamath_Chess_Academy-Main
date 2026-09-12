@@ -83,12 +83,19 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
   const openingRows = stats.topOpenings
     .map(
       (opening) =>
-        `<tr><td>${htmlEscape(opening.name)}</td><td>${opening.count}</td><td>${opening.winRate.toFixed(1)}%</td></tr>`,
+        `<tr><td>${htmlEscape(opening.name)}</td><td>${opening.count}</td><td>${
+          opening.winRate === null
+            ? '<span class="muted">not enough games yet</span>'
+            : `${opening.winRate.toFixed(1)}%`
+        }</td></tr>`,
     )
     .join("");
 
   const weakRows = stats.weakestOpenings
-    .map((opening) => `<tr><td>${htmlEscape(opening.name)}</td><td>${opening.accuracy.toFixed(1)}%</td></tr>`)
+    .map(
+      (opening) =>
+        `<tr><td>${htmlEscape(opening.name)}</td><td>${opening.accuracy.toFixed(1)}%</td><td>${opening.count}</td></tr>`,
+    )
     .join("");
 
   return `<!doctype html>
@@ -105,6 +112,7 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
     th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
     th { background: #f3f4f6; }
     .footnote { margin-top: 28px; font-size: 11px; color: #6b7280; }
+    .muted { color: #6b7280; font-style: italic; }
     ${MARKDOWN_PDF_CSS}
   </style>
 </head>
@@ -126,12 +134,12 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
   </table>
   <h2>Most played openings</h2>
   <table>
-    <thead><tr><th>Opening</th><th>Games</th><th>Win rate</th></tr></thead>
+    <thead><tr><th>Opening</th><th>Games</th><th>Score</th></tr></thead>
     <tbody>${openingRows || "<tr><td colspan=\"3\">No opening data.</td></tr>"}</tbody>
   </table>
   <h2>Lowest accuracy openings</h2>
   <table>
-    <thead><tr><th>Opening</th><th>Accuracy</th></tr></thead>
+    <thead><tr><th>Opening</th><th>Accuracy</th><th>Games</th></tr></thead>
     <tbody>${weakRows || "<tr><td colspan=\"2\">No opening data.</td></tr>"}</tbody>
   </table>
   <p class="footnote">

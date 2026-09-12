@@ -9,7 +9,7 @@
 import { Chess } from "chess.js";
 import { buildLineFromPgn, buildLineFromSan, buildMoveAnalyses, type MoveAnalysis, type PositionNode } from "@/lib/engine/analysis";
 import { analyzePositions, type ServerScore } from "@/lib/engine/serverEngine";
-import { averageAccuracy } from "@/lib/engine/classify";
+import { averageAccuracy, centipawnLoss, classifyMove, scoreToCentipawns } from "@/lib/engine/classify";
 import type { GameReportStats } from "@/lib/claude";
 
 /**
@@ -40,9 +40,33 @@ export const REPORT_BUDGET = {
   threads: 2,
   /** Opening moves are book; scoring them punishes theory the player knows. */
   bookPlies: 8,
-  maxPositions: 2400,
+  /**
+   * This, not `maxGames`, is what actually binds. Measured in production: a 60-game
+   * request analysed only 36, because these games average ~67 scored positions each and
+   * 36 x 67 is the old 2400 ceiling. Raising `maxGames` alone did nothing.
+   *
+   * More games matters specifically for the OPENING tables — "1 game, 100% win rate" is
+   * noise printed as a finding, and that was the original complaint. Accuracy and blunder
+   * rate converge long before this.
+   */
+  maxPositions: 4000,
   maxPliesPerGame: 120,
   totalTimeoutMs: 15 * 60 * 1000,
+  /**
+   * Depth for the second look at anything the shallow pass called a BLUNDER.
+   *
+   * Digital Second already refuses to accuse a player on depth 12 alone — "a depth-12
+   * best move is not solid enough to accuse someone of missing a tactic" — and re-checks
+   * at 18. The report was making a stronger accusation ("this move was a blunder") on
+   * weaker evidence, to a child, about their own game.
+   *
+   * MEASURED: depth 18 costs 196 ms per position against 23 ms at depth 12 — 8.5x. That
+   * is why only blunders are re-checked and not mistakes: at the observed rates, blunders
+   * cost ~150 extra searches, while including mistakes would cost ~500 and add eight to
+   * thirteen minutes to a report that already takes fifteen.
+   */
+  confirmDepth: 18,
+  confirmTimeoutMs: 5 * 60 * 1000,
 };
 
 export type NormalisedGame = {
@@ -51,7 +75,27 @@ export type NormalisedGame = {
   nodes: PositionNode[];
   openingName: string;
   won: boolean;
+  /**
+   * Tracked separately because a draw is NOT a loss. Both normalisers derived
+   * `won` alone, so every drawn game was counted as a defeat in the opening
+   * tables — a player who draws half their Caro-Kanns was shown a 50% win rate
+   * as if they were losing them. The tables now report SCORE (win 1, draw ½).
+   */
+  drawn: boolean;
 };
+
+/**
+ * Chess.com's per-player `result` string. Anything not listed here is a loss
+ * ("checkmated", "resigned", "timeout", "abandoned"); "win" is the only win.
+ */
+const CHESSCOM_DRAWS = new Set([
+  "agreed",
+  "repetition",
+  "stalemate",
+  "insufficient",
+  "50move",
+  "timevsinsufficient",
+]);
 
 type LichessGame = {
   moves?: string;
@@ -99,6 +143,8 @@ export function normaliseLichessGames(raw: unknown[], username: string): Normali
       nodes,
       openingName: entry.opening?.name ?? "Unknown Opening",
       won: entry.winner === (subject === "w" ? "white" : "black"),
+      // Lichess omits `winner` entirely on a draw.
+      drawn: entry.winner === undefined,
     });
   }
 
@@ -125,6 +171,7 @@ export function normaliseChessComGames(raw: unknown[], username: string): Normal
       nodes,
       openingName: openingFromPgn(entry.pgn) ?? "Unknown Opening",
       won: player?.result === "win",
+      drawn: CHESSCOM_DRAWS.has(player?.result ?? ""),
     });
   }
 
@@ -143,6 +190,63 @@ function openingFromPgn(pgn: string | undefined): string | null {
 type Phase = "opening" | "middlegame" | "endgame";
 
 /** Endgame once few pieces remain; the first moves are opening by ply count. */
+/**
+ * Collapse a hyper-specific opening name to its FAMILY.
+ *
+ * This is the single biggest reason a real report looked wrong. Chess.com and Lichess
+ * name openings down to the exact move order, so one student's 36 games scattered across
+ * ~30 distinct "openings" and every row of the table read "1 game". Their actual report
+ * listed these as three separate openings:
+ *
+ *   Closed Sicilian Defense Portland Attack 3...g6 4.Be3   1 game   100.0%
+ *   Colle System 3...e6 4.Bd3 Bd6 5.Nbd2                   1 game     0.0%
+ *   Colle System Rubinstein Opening 5...Nc6 6.O O          1 game     0.0%
+ *
+ * — two of which are the same opening, and none of which support a percentage. The
+ * narrative then told a child they had "a 100% win rate in the Closed Sicilian", from one
+ * game.
+ *
+ * The rule: drop the trailing move list, take the part before Lichess's ":", then cut at
+ * the first family word (Defense / Opening / Game / System / Gambit / Attack) or three
+ * words, whichever comes first. Deliberately blunt — grouping slightly too broadly pools
+ * evidence, while grouping too narrowly manufactures 1-game findings, and only one of
+ * those two failures misleads a student.
+ */
+const FAMILY_WORDS = /^(defense|defence|opening|game|system|gambit|attack)$/i;
+
+export function openingFamily(name: string): string {
+  // Everything from the first move-number token onwards is a move list, not a name.
+  // `^` as well as `\s`, because a name that is ONLY a move list ("1.e4 e5") has no
+  // leading space and would otherwise survive whole.
+  const withoutMoves = name.split(/(?:^|\s+)\d+\.{1,3}/)[0] ?? name;
+  // Lichess writes "Family: Variation, Sub-variation".
+  const beforeColon = (withoutMoves.split(":")[0] ?? withoutMoves).split(",")[0] ?? withoutMoves;
+
+  const words = beforeColon.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "Unknown Opening";
+
+  const out: string[] = [];
+  for (const word of words) {
+    out.push(word);
+    if (FAMILY_WORDS.test(word)) break;
+    if (out.length === 3) break;
+  }
+
+  // A leftover digit means this was notation, not a name. Better to say "Unknown Opening"
+  // than to open a table row with "2.Nf3" and call it an opening the student plays.
+  const family = out.join(" ");
+  return family && !/\d/.test(family) ? family : "Unknown Opening";
+}
+
+/**
+ * Below this many games an opening gets a name and a count but NO percentage.
+ *
+ * The same rule the dossier already applies to every rate it publishes: a figure computed
+ * from one or two events is not a finding, and printing it as one is how a report becomes
+ * superstition. Three is the floor at which "you tend to..." is worth saying at all.
+ */
+export const MIN_OPENING_GAMES = 3;
+
 function phaseFor(fen: string, ply: number): Phase {
   if (ply <= 24) return "opening";
 
@@ -202,6 +306,74 @@ function detectPatterns(blunders: Array<{ analysis: MoveAnalysis; node: Position
     .map(([label]) => label);
 }
 
+/** A blunder the shallow pass flagged, with everything needed to re-judge it. */
+type BlunderCandidate = {
+  analysis: MoveAnalysis;
+  node: PositionNode;
+  mover: "w" | "b";
+};
+
+/**
+ * Re-judge the shallow pass's blunders at `confirmDepth`, and return the plies that
+ * survive.
+ *
+ * Depth 12 sees a move as throwing away three pawns; depth 18 often sees the compensation
+ * and the "blunder" evaporates. Publishing the shallow verdict means telling a student
+ * they blundered when they did not — which is both wrong and, for a child reading a report
+ * about their own play, worse than wrong.
+ *
+ * When the budget runs out the remaining candidates KEEP their shallow verdict rather than
+ * being dropped. Dropping would bias the blunder rate downward by silently deleting the
+ * very moves under examination; `confirmed` reports how many were actually re-checked so
+ * the caller can be honest about it.
+ */
+async function confirmBlunders(
+  candidates: BlunderCandidate[],
+): Promise<{ survivors: Set<number>; confirmed: number }> {
+  // Keyed by INDEX into `candidates`, never by ply: ply restarts in every game, so a
+  // surviving blunder on move 15 of one game would otherwise vouch for move 15 of every
+  // other game in the report.
+  const survivors = new Set(candidates.map((_, index) => index));
+  if (candidates.length === 0) return { survivors, confirmed: 0 };
+
+  const fens: string[] = [];
+  for (const c of candidates) {
+    fens.push(c.node.fenBefore, c.node.fen);
+  }
+
+  const deep = await analyzePositions(fens, {
+    depth: REPORT_BUDGET.confirmDepth,
+    threads: REPORT_BUDGET.threads,
+    totalTimeoutMs: REPORT_BUDGET.confirmTimeoutMs,
+  });
+
+  let confirmed = 0;
+  for (let i = 0; i < candidates.length; i += 1) {
+    const before = deep[i * 2];
+    const after = deep[i * 2 + 1];
+    // A short array means the budget ran out here; everything past this point keeps its
+    // shallow verdict.
+    if (!before || !after) break;
+
+    confirmed += 1;
+    const cpLoss = centipawnLoss(
+      scoreToCentipawns(before.cp, before.mate),
+      scoreToCentipawns(after.cp, after.mate),
+      candidates[i].mover,
+    );
+    if (classifyMove({ cpLoss, isTopMove: false }) !== "blunder") {
+      survivors.delete(i);
+    }
+  }
+
+  if (confirmed < candidates.length) {
+    console.warn(
+      `[report] deep confirmation ran out after ${confirmed}/${candidates.length} blunders`,
+    );
+  }
+  return { survivors, confirmed };
+}
+
 /**
  * Evaluate the games and build the report statistics.
  *
@@ -244,7 +416,8 @@ export async function buildGameStats(
   const byPhase: Record<Phase, number[]> = { opening: [], middlegame: [], endgame: [] };
   const counts = { blunder: 0, mistake: 0, inaccuracy: 0 };
   const blunders: Array<{ analysis: MoveAnalysis; node: PositionNode; reply: ServerScore | undefined }> = [];
-  const openings = new Map<string, { count: number; wins: number; accuracies: number[] }>();
+  const candidates: BlunderCandidate[] = [];
+  const openings = new Map<string, { count: number; score: number; accuracies: number[] }>();
 
   let gamesAnalyzed = 0;
   let movesAnalyzed = 0;
@@ -281,11 +454,13 @@ export async function buildGameStats(
       byPhase[phaseFor(node.fenBefore, node.ply)].push(analysis.accuracy);
 
       if (analysis.classification === "blunder") {
-        counts.blunder += 1;
+        // NOT counted yet — a depth-12 blunder is a candidate, not a verdict. The deep
+        // pass below decides, and `counts.blunder` is tallied from what survives.
         // windowScores[i] scores the position before subNodes[i], so the score
         // just after this move — the engine's refutation — sits at i + 1.
         const reply = windowScores[analysis.ply - basePly + 1];
         blunders.push({ analysis, node, reply });
+        candidates.push({ analysis, node, mover: window.game.subject });
       } else if (analysis.classification === "mistake") {
         counts.mistake += 1;
       } else if (analysis.classification === "inaccuracy") {
@@ -293,15 +468,29 @@ export async function buildGameStats(
       }
     }
 
-    const opening = openings.get(window.game.openingName) ?? {
-      count: 0,
-      wins: 0,
-      accuracies: [],
-    };
+    // Keyed by FAMILY, so move-order variants of one opening pool their evidence
+    // instead of each producing its own single-game row.
+    const family = openingFamily(window.game.openingName);
+    const opening = openings.get(family) ?? { count: 0, score: 0, accuracies: [] };
     opening.count += 1;
-    opening.wins += window.game.won ? 1 : 0;
+    // Score, not wins: a draw is half a point, not a loss.
+    opening.score += window.game.won ? 1 : window.game.drawn ? 0.5 : 0;
     opening.accuracies.push(...gameAccuracies);
-    openings.set(window.game.openingName, opening);
+    openings.set(family, opening);
+  }
+
+  // Second look at every shallow blunder. Only the ones that survive depth 18 are counted
+  // or shown, so the blunder rate and the "recurring problems" list describe moves that
+  // are still blunders when the engine looks properly.
+  const { survivors, confirmed } = await confirmBlunders(candidates);
+  // `blunders` and `candidates` are appended together in the same loop, so index i in one
+  // is index i in the other. Filtering both by the same index set keeps them aligned.
+  counts.blunder = survivors.size;
+  const confirmedBlunders = blunders.filter((_, index) => survivors.has(index));
+  if (confirmed < candidates.length) {
+    console.warn(
+      `[report] ${candidates.length - confirmed} blunders kept their depth-12 verdict`,
+    );
   }
 
   const entries = [...openings.entries()];
@@ -319,20 +508,30 @@ export async function buildGameStats(
     openingAccuracy: averageAccuracy(byPhase.opening),
     middlegameAccuracy: averageAccuracy(byPhase.middlegame),
     endgameAccuracy: averageAccuracy(byPhase.endgame),
+    // Only openings with enough games carry a percentage. Below the floor the row still
+    // appears — the student DID play it — but `winRate` is null and the renderer and the
+    // prompt both say "not enough games yet" rather than printing a number.
     topOpenings: entries
       .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 3)
+      .slice(0, 5)
       .map(([name, data]) => ({
         name,
         count: data.count,
-        winRate: data.count > 0 ? Math.round((data.wins / data.count) * 1000) / 10 : 0,
+        winRate:
+          data.count >= MIN_OPENING_GAMES
+            ? Math.round((data.score / data.count) * 1000) / 10
+            : null,
       })),
     weakestOpenings: entries
-      .filter(([, data]) => data.accuracies.length > 0)
-      .map(([name, data]) => ({ name, accuracy: averageAccuracy(data.accuracies) }))
+      .filter(([, data]) => data.count >= MIN_OPENING_GAMES && data.accuracies.length > 0)
+      .map(([name, data]) => ({
+        name,
+        accuracy: averageAccuracy(data.accuracies),
+        count: data.count,
+      }))
       .sort((a, b) => a.accuracy - b.accuracy)
       .slice(0, 3),
-    tacticalPatternsMissed: detectPatterns(blunders),
+    tacticalPatternsMissed: detectPatterns(confirmedBlunders),
   };
 
   return { stats, gamesAnalyzed };

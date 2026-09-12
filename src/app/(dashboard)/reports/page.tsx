@@ -25,16 +25,22 @@ const POLL_INTERVAL_MS = 3000;
  * poll timeout could stop updating while the report was still being built — the page would
  * sit on "Analysing" forever and a finished report would only appear on a reload. That is
  * the same mismatch already fixed on the dossier page; keep this comfortably above the job.
+ * Raised again when the deep self-profile landed: a report can now run ~25 minutes, so a
+ * 25-minute poll would stop at exactly the wrong moment.
  */
-const POLL_TIMEOUT_MS = 25 * 60 * 1000;
+const POLL_TIMEOUT_MS = 40 * 60 * 1000;
 
 /**
  * What a report actually costs on the 2-vCPU production box. Two engine passes: the
- * accuracy pass over up to 60 games (serial, one engine, ~5 min) and then the deep
- * self-profile — the same stages the opponent dossier runs, over both colours (~3 min).
- * Quoted as a range so a slower run does not read as a fault.
+ * accuracy pass over up to 60 games and then the deep self-profile — the same stages the
+ * opponent dossier runs, over both colours.
+ *
+ * MEASURED, not estimated: the first production run took ~15 minutes at a 2400-position
+ * budget. That budget is now 4000, so the first pass grows by about two thirds.
+ * Under-promising here is not kindness — a student watching a counter pass the number we
+ * gave them assumes it has hung.
  */
-const TYPICAL_BUILD_LABEL = "usually 8-12 minutes";
+const TYPICAL_BUILD_LABEL = "usually 15-25 minutes";
 
 /** "42s", "3m 05s" — how long this report has been building. */
 function elapsedLabel(startIso: string, nowMs: number) {
@@ -78,7 +84,17 @@ export default function ReportsPage() {
 
   const loadReports = useCallback(async () => {
     try {
-      const response = await fetch("/api/reports");
+      let response = await fetch("/api/reports");
+
+      // A 401 here is almost never a real sign-out. This page polls for up to 25 minutes
+      // while a report builds, and the access token lives 15, so a long build WILL cross
+      // an expiry — which surfaced as a red "Unauthorized" sitting over a report that was
+      // building perfectly well. Refresh once and retry before believing it.
+      if (response.status === 401) {
+        const refreshed = await fetch("/api/auth/refresh", { method: "POST" });
+        if (refreshed.ok) response = await fetch("/api/reports");
+      }
+
       const data = await response.json();
       if (!response.ok || !data.success) {
         setListError(data.message ?? "Could not load your reports.");
