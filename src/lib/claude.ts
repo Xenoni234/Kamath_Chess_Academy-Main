@@ -64,6 +64,17 @@ export type GameReportStats = {
   topOpenings: Array<{ name: string; winRate: number; count: number }>;
   weakestOpenings: Array<{ name: string; accuracy: number }>;
   tacticalPatternsMissed: string[];
+  /**
+   * Deep self-profile, already rendered to prompt text by
+   * `describeSelfProfile` (src/lib/reports/selfProfile.ts): the same weakness,
+   * tactical, behavioural and evolution stages the opponent dossier runs, pointed
+   * at the student's own games and split by colour.
+   *
+   * Optional because every stage degrades independently — a failed or too-thin
+   * scan costs these sections, never the report. Absent means "we could not build
+   * it", NEVER "there is nothing to say", and the prompt must not imply otherwise.
+   */
+  selfProfile?: string;
 };
 
 /**
@@ -90,7 +101,20 @@ export function isClaudeConfigured(): boolean {
  */
 const MOVE_EXPLANATION_SYSTEM =
   "You are a chess coach explaining a move to a student. The position and the move have already been analysed by a chess engine and by a position checker — every fact you need is given to you. Never invent a move, never name a move that is not in the supplied list, never contradict the supplied evaluations, and never claim a tactic that is not listed, and never state that a piece stands on a square unless the supplied piece list puts it there. If the facts do not explain why a move is good, say plainly what the move does and what the evaluation shows instead of speculating.";
-const REPORT_SYSTEM = "You are a chess coach writing a concise performance report for a student.";
+/**
+ * The audience is a child and their parent, not a chess engine operator.
+ *
+ * The figures stay — a parent paying fees wants to see them, and a coach needs them — but
+ * the sentences around them have to be readable by the student the report is about. The
+ * academy's students start at five and six.
+ */
+const REPORT_SYSTEM =
+  "You are a chess coach writing a performance report for a young student and their parent. " +
+  "Be DETAILED — go through everything the numbers show and explain what each one means for " +
+  "their play. But write it in plain, warm, everyday language a child can read: short sentences, " +
+  "no jargon, and explain any chess term you use the first time. Detailed does not mean technical. " +
+  "Keep every figure you are given, and say what it means in words as well as numbers. " +
+  "Be encouraging and specific about what to practise next.";
 const REPERTOIRE_SYSTEM =
   "You are a chess second preparing a player for a specific opponent. You annotate lines that have already been chosen by engine analysis — never invent moves, never contradict the supplied evaluations.";
 const OPENING_SYSTEM =
@@ -201,7 +225,25 @@ function moveExplanationPrompt(f: MoveFacts, words: number) {
 }
 
 function reportPrompt(stats: GameReportStats) {
-  return `Write a 3-paragraph performance report for ${stats.username}. Include an overall assessment with numbers, key strengths, and the top 2-3 improvement areas with actionable advice. Every figure below comes from a Stockfish analysis of the player's own moves — cite them, and do not invent any others.
+  // The deep profile is the difference between "you scored 87%" and "here is what you
+  // are actually weak at". When it is present it leads the improvement sections; when it
+  // is absent nothing may pretend it was there.
+  const profileBlock = stats.selfProfile
+    ? `
+
+DEEP PROFILE — this is the most useful material here, so build sections (3) and (5) mainly from it, and name the specific positions and patterns rather than summarising them away. It is split by colour because playing White and playing Black are different skills:
+
+${stats.selfProfile}
+
+Rules for the block above, without exception: never quote a rate without the sample size next to it; where the evidence is marked thin or a range is wide, say so in plain words instead of stating it as fact; and describe the clock and position-type numbers as things the games show, never as what the student feels or fears.`
+    : "";
+
+
+  return `Write a detailed performance report for ${stats.username}, for them and their parent to read together.
+
+Cover, in this order: (1) how they are playing overall, in words first and then with the numbers; (2) what they are doing WELL, with the figure that shows it; (3) their real weaknesses — the specific positions they keep reaching and misplaying, the tactics they keep missing, and when in a game their play drops off, as White and as Black separately; (4) their openings: which ones are going well and which are costing them, and what to do about each; (5) the top 3 things to practise next, each one a concrete exercise they could actually do this week, each tied to a weakness named in (3).
+
+Every figure below comes from a Stockfish analysis of the player's own moves — cite them, and do not invent any others. Whenever you give a percentage, say in plain words what it means (for example, what a blunder is, or what "accuracy" is measuring) — assume the reader has never seen these numbers before.
 
 Stats:
 Games analysed: ${stats.totalGames}
@@ -215,7 +257,7 @@ Middlegame accuracy: ${stats.middlegameAccuracy}%
 Endgame accuracy: ${stats.endgameAccuracy}%
 Top openings: ${JSON.stringify(stats.topOpenings)}
 Weakest openings: ${JSON.stringify(stats.weakestOpenings)}
-Recurring problems behind their blunders: ${stats.tacticalPatternsMissed.join(", ") || "none clearly identified — say so rather than guessing"}`;
+Recurring problems behind their blunders: ${stats.tacticalPatternsMissed.join(", ") || "none clearly identified — say so rather than guessing"}${profileBlock}`;
 }
 
 function repertoirePrompt(description: string) {
@@ -250,15 +292,19 @@ function anthropicClient(): Anthropic {
   return client;
 }
 
-function textFromMessage(message: Anthropic.Messages.Message) {
-  if ("content" in message) {
-    return message.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("")
-      .trim();
-  }
-  return "";
+function textFromMessage(message: Anthropic.Messages.Message): Completion {
+  const text =
+    "content" in message
+      ? message.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("")
+          .trim()
+      : "";
+
+  // Anthropic's spelling of `finish_reason: "length"`. Ignoring it hid the same bug
+  // on this provider that it hid on the other two.
+  return { text, truncated: message.stop_reason === "max_tokens" };
 }
 
 // ---------------------------------------------------------------------------
@@ -361,36 +407,67 @@ async function llmChat(system: string, prompt: string, maxTokens: number): Promi
  * Make a cut-off document end at a sensible place.
  *
  * A truncated answer is not wrong, it is unfinished — so the honest thing is to show the
- * part that IS finished and stop. Drops the trailing partial line, then any trailing
- * markdown table row (a table missing its last rows still renders; half a row does not),
- * then backs up to the last completed sentence.
+ * part that IS finished and stop.
+ *
+ * The rule is DELIBERATELY conservative: drop only what is actually damaged. Two
+ * over-corrections were written and rejected on the way here, both of which threw away
+ * text the model had finished:
+ *
+ *   - popping every trailing line that starts with `|` deleted the whole table, not just
+ *     the half-written row at the bottom of it;
+ *   - popping the last line unconditionally erased the ENTIRE answer whenever the model
+ *     wrote one long paragraph with no newline in it — the common case for the game
+ *     report, which is three paragraphs of prose.
+ *
+ * So the last line is classified instead. A half-written table row or heading is
+ * structurally broken and goes. A half-written sentence is trimmed back to its own last
+ * full stop, which keeps every sentence before the cut.
  */
+const TABLE_ROW = /^\s*\|/;
+/** `| --- | :--: |` — the row that turns the line above it into a header. */
+const TABLE_RULE = /^\s*\|[\s:|-]+\|?\s*$/;
+/** Characters a finished line may legitimately end on. */
+const SENTENCE_END = /[.!?:)\]`"']$/;
+
 export function endCleanly({ text, truncated }: Completion): string {
   if (!truncated || !text) return text;
 
   const lines = text.split("\n");
-  lines.pop(); // the line the model was in the middle of writing
+  const tail = (lines.pop() ?? "").trimEnd();
 
-  while (lines.length) {
-    const last = (lines[lines.length - 1] ?? "").trim();
-    // A dangling table row, a dangling heading, or a dangling list bullet all read as
-    // damage rather than as an ending.
-    if (last === "" || last.startsWith("|") || last.startsWith("#") || /^[-*+]\s*$/.test(last)) {
-      lines.pop();
-      continue;
+  // Markdown structure cannot be repaired by trimming, so a broken row or heading is
+  // dropped whole. Prose can: keep the sentences that completed before the cut.
+  if (!TABLE_ROW.test(tail) && !tail.trimStart().startsWith("#")) {
+    const stop = SENTENCE_END.test(tail)
+      ? tail.length - 1
+      : Math.max(tail.lastIndexOf(". "), tail.lastIndexOf("! "), tail.lastIndexOf("? "));
+    if (stop >= 0) lines.push(tail.slice(0, stop + 1).trimEnd());
+  }
+
+  const last = () => lines[lines.length - 1] ?? "";
+
+  // Blank lines, a heading that now introduces nothing, and an empty list bullet.
+  while (
+    lines.length &&
+    (last().trim() === "" || last().trimStart().startsWith("#") || /^\s*[-*+]\s*$/.test(last()))
+  ) {
+    lines.pop();
+  }
+
+  // A table left with no data rows: drop the header block rather than render an empty
+  // table, which reads as a mistake rather than as an ending. A table that still has at
+  // least one row is kept intact.
+  if (lines.length && TABLE_ROW.test(last())) {
+    let start = lines.length - 1;
+    while (start > 0 && TABLE_ROW.test(lines[start - 1] ?? "")) start--;
+    const dataRows = lines.slice(start).filter((line) => !TABLE_RULE.test(line)).length;
+    if (dataRows <= 1) {
+      lines.length = start;
+      while (lines.length && last().trim() === "") lines.pop();
     }
-    break;
   }
 
-  let out = lines.join("\n").trimEnd();
-
-  // If the surviving text still ends mid-sentence, cut back to the last full stop.
-  if (out && !/[.!?:)\]`"']$/.test(out)) {
-    const stop = Math.max(out.lastIndexOf(". "), out.lastIndexOf(".\n"), out.lastIndexOf("!"), out.lastIndexOf("?"));
-    if (stop > out.length * 0.5) out = out.slice(0, stop + 1);
-  }
-
-  return out.trimEnd();
+  return lines.join("\n").trimEnd();
 }
 
 async function* llmChatStream(system: string, prompt: string, maxTokens: number): AsyncGenerator<string> {
@@ -635,6 +712,27 @@ export type OpponentRepertoireParams = {
 // Public API (stable across providers)
 // ---------------------------------------------------------------------------
 
+/**
+ * Output budgets.
+ *
+ * `endCleanly` makes a cut-off answer end tidily; it cannot put back what was never
+ * written. These are sized so truncation is rare rather than merely survivable.
+ *
+ * The guide and briefing prompts both ask for "5-7 short paragraphs" that walk through
+ * every variation in turn — comfortably 700-900 words, or ~1300 tokens, before the
+ * markdown tables. They were capped at 1600, which is why a real student's opening
+ * guide stopped in the middle of a table row. The report asks for three paragraphs of
+ * prose with figures and was capped at 600.
+ *
+ * Local budgets stay lower on purpose: a 2B model on this 2-vCPU box spends real seconds
+ * per token and competes with Stockfish for the same cores.
+ */
+const LONG_FORM_TOKENS = { local: 2000, hosted: 3200 };
+// The report now carries a full self-profile — weaknesses, tactics and behaviour, split
+// by colour — so the narrative is closer in size to the dossier briefing than to the four
+// paragraphs it used to be. Sized against LONG_FORM_TOKENS for that reason.
+const REPORT_TOKENS = { local: 1600, hosted: 3200 };
+
 /** Local models are token-bound; hosted ones are not. See moveExplanationPrompt. */
 const LOCAL_EXPLANATION = { words: 80, maxTokens: 200 };
 const HOSTED_EXPLANATION = { words: 150, maxTokens: 400 };
@@ -645,12 +743,12 @@ export async function explainChessMove(params: ChessMoveExplanationParams): Prom
   if (provider === "template") return templateMoveExplanation(params);
   if (provider === "ollama") {
     const { words, maxTokens } = LOCAL_EXPLANATION;
-    return ollamaChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens);
+    return endCleanly(await ollamaChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens));
   }
 
   const { words, maxTokens } = HOSTED_EXPLANATION;
   if (provider === "openai-compatible") {
-    return llmChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens);
+    return endCleanly(await llmChat(MOVE_EXPLANATION_SYSTEM, moveExplanationPrompt(params, words), maxTokens));
   }
 
   const message = await anthropicClient().messages.create({
@@ -659,7 +757,7 @@ export async function explainChessMove(params: ChessMoveExplanationParams): Prom
     system: MOVE_EXPLANATION_SYSTEM,
     messages: [{ role: "user", content: moveExplanationPrompt(params, words) }],
   });
-  return textFromMessage(message);
+  return endCleanly(textFromMessage(message));
 }
 
 export async function* streamChessMoveExplanation(params: ChessMoveExplanationParams): AsyncGenerator<string> {
@@ -700,19 +798,19 @@ export async function generateGameReportNarrative(stats: GameReportStats): Promi
 
   if (provider === "template") return templateReportNarrative(stats);
   if (provider === "ollama") {
-    return ollamaChat(REPORT_SYSTEM, reportPrompt(stats), 400);
+    return endCleanly(await ollamaChat(REPORT_SYSTEM, reportPrompt(stats), REPORT_TOKENS.local));
   }
   if (provider === "openai-compatible") {
-    return llmChat(REPORT_SYSTEM, reportPrompt(stats), 600);
+    return endCleanly(await llmChat(REPORT_SYSTEM, reportPrompt(stats), REPORT_TOKENS.hosted));
   }
 
   const message = await anthropicClient().messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: 400,
+    max_tokens: REPORT_TOKENS.local,
     system: REPORT_SYSTEM,
     messages: [{ role: "user", content: reportPrompt(stats) }],
   });
-  return textFromMessage(message);
+  return endCleanly(textFromMessage(message));
 }
 
 /**
@@ -730,22 +828,22 @@ export async function generateOpponentRepertoire(params: OpponentRepertoireParam
 
   try {
     if (provider === "ollama") {
-      const text = await ollamaChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), 1200);
+      const text = endCleanly(await ollamaChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), LONG_FORM_TOKENS.local));
       return text || templateRepertoireNarrative(params);
     }
 
     if (provider === "openai-compatible") {
-      const text = await llmChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), 1600);
+      const text = endCleanly(await llmChat(REPERTOIRE_SYSTEM, repertoirePrompt(params.description), LONG_FORM_TOKENS.hosted));
       return text || templateRepertoireNarrative(params);
     }
 
     const message = await anthropicClient().messages.create({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1200,
+      max_tokens: LONG_FORM_TOKENS.local,
       system: REPERTOIRE_SYSTEM,
       messages: [{ role: "user", content: repertoirePrompt(params.description) }],
     });
-    return textFromMessage(message) || templateRepertoireNarrative(params);
+    return endCleanly(textFromMessage(message)) || templateRepertoireNarrative(params);
   } catch (error) {
     console.error("[second] repertoire generation failed, using template:", error);
     return templateRepertoireNarrative(params);
@@ -795,22 +893,22 @@ export async function generateOpeningGuide(params: OpeningGuideParams): Promise<
 
   try {
     if (provider === "ollama") {
-      const text = await ollamaChat(OPENING_SYSTEM, openingPrompt(params.description), 1200);
+      const text = endCleanly(await ollamaChat(OPENING_SYSTEM, openingPrompt(params.description), LONG_FORM_TOKENS.local));
       return text || templateOpeningGuide(params);
     }
 
     if (provider === "openai-compatible") {
-      const text = await llmChat(OPENING_SYSTEM, openingPrompt(params.description), 1600);
+      const text = endCleanly(await llmChat(OPENING_SYSTEM, openingPrompt(params.description), LONG_FORM_TOKENS.hosted));
       return text || templateOpeningGuide(params);
     }
 
     const message = await anthropicClient().messages.create({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1200,
+      max_tokens: LONG_FORM_TOKENS.local,
       system: OPENING_SYSTEM,
       messages: [{ role: "user", content: openingPrompt(params.description) }],
     });
-    return textFromMessage(message) || templateOpeningGuide(params);
+    return endCleanly(textFromMessage(message)) || templateOpeningGuide(params);
   } catch (error) {
     console.error("[opening] guide generation failed, using template:", error);
     return templateOpeningGuide(params);
