@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Plus, Users, CalendarPlus, X } from "lucide-react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Batch = {
   id: string;
@@ -62,7 +63,7 @@ export default function ScheduleClient({ role }: { role: string }) {
   const [scheduling, setScheduling] = useState(false);
 
   async function reloadBatches() {
-    const res = await fetch("/api/batches");
+    const res = await fetchWithAuth("/api/batches");
     const data = await res.json();
     if (data.success) setBatches(data.batches);
   }
@@ -73,12 +74,12 @@ export default function ScheduleClient({ role }: { role: string }) {
     // is, for a coach, working perfectly. `/api/batches` already returns only
     // their own batches.
     const requests: Promise<{ success: boolean; batches?: Batch[]; users?: UserLite[] }>[] = [
-      fetch("/api/batches").then((r) => r.json()),
+      fetchWithAuth("/api/batches").then((r) => r.json()),
     ];
     if (isManager) {
       requests.push(
-        fetch("/api/users?role=COACH").then((r) => r.json()),
-        fetch("/api/users?role=STUDENT").then((r) => r.json()),
+        fetchWithAuth("/api/users?role=COACH").then((r) => r.json()),
+        fetchWithAuth("/api/users?role=STUDENT").then((r) => r.json()),
       );
     }
     Promise.all(requests)
@@ -96,7 +97,7 @@ export default function ScheduleClient({ role }: { role: string }) {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch("/api/batches", {
+      const res = await fetchWithAuth("/api/batches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newName, description: newDesc || undefined, coachUserId: newCoach || undefined }),
@@ -114,7 +115,7 @@ export default function ScheduleClient({ role }: { role: string }) {
 
   async function assignCoach(batchId: string, coachUserId: string) {
     if (!coachUserId) return;
-    await fetch(`/api/batches/${batchId}`, {
+    await fetchWithAuth(`/api/batches/${batchId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ coachUserId }),
@@ -126,7 +127,7 @@ export default function ScheduleClient({ role }: { role: string }) {
     const value = enrollSel[batchId]?.trim();
     if (!value) return;
     setEnrollMsg((prev) => ({ ...prev, [batchId]: "" }));
-    const res = await fetch(`/api/batches/${batchId}/enroll`, {
+    const res = await fetchWithAuth(`/api/batches/${batchId}/enroll`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Staff selected an id; a coach typed a name. The API takes either.
@@ -160,7 +161,7 @@ export default function ScheduleClient({ role }: { role: string }) {
     if (!modalBatch || !clsTitle.trim() || !clsStart || !clsEnd) return;
     setScheduling(true);
     try {
-      const res = await fetch("/api/classes", {
+      const res = await fetchWithAuth("/api/classes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -383,7 +384,7 @@ function CoachActivity() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/admin/coach-activity")
+    fetchWithAuth("/api/admin/coach-activity")
       .then((r) => r.json())
       .then((d) => {
         if (active && d.success) setRows(d.coaches ?? []);

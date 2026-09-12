@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Payment = {
   id: string;
@@ -56,7 +57,7 @@ export default function StudentFeesClient({
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/payments?userId=${encodeURIComponent(userId)}`);
+      const res = await fetchWithAuth(`/api/payments?userId=${encodeURIComponent(userId)}`);
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not load your fee record.");
@@ -82,7 +83,7 @@ export default function StudentFeesClient({
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch("/api/payments/order", {
+      const res = await fetchWithAuth("/api/payments/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentId: payment.id }),

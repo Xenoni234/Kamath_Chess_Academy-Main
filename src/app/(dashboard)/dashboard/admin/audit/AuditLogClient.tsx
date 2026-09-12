@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { auditActionLabel } from "@/lib/auditActions";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Entry = {
   id: string;
@@ -38,7 +39,7 @@ export default function AuditLogClient() {
       const params = new URLSearchParams();
       if (opts.action) params.set("action", opts.action);
       if (opts.cursor) params.set("cursor", opts.cursor);
-      const res = await fetch(`/api/admin/audit?${params}`);
+      const res = await fetchWithAuth(`/api/admin/audit?${params}`);
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not load the audit log.");

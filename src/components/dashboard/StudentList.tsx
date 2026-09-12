@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Student = {
   id: string;
@@ -21,7 +22,7 @@ export default function StudentList({ emptyMessage }: { emptyMessage: string }) 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/students");
+        const res = await fetchWithAuth("/api/students");
         const data = await res.json();
         if (!res.ok || !data.success) {
           setError(data.message ?? "Could not load students.");

@@ -7,6 +7,7 @@ import ChessBoard from "@/components/chess/ChessBoard";
 import { START_FEN, type PositionNode } from "@/lib/engine/analysis";
 import { uciToMove } from "@/lib/engine/uci";
 import { cn } from "@/lib/utils";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 /**
  * Lichess opening explorer over the platform's cached proxy
@@ -72,7 +73,7 @@ export default function OpeningsPage() {
         ratings: ratings.join(","),
       });
 
-      fetch(`/api/analysis/opening?${params.toString()}`, { signal: controller.signal })
+      fetchWithAuth(`/api/analysis/opening?${params.toString()}`, { signal: controller.signal })
         .then(async (response) => {
           const payload = await response.json();
           if (!response.ok || !payload.success) {

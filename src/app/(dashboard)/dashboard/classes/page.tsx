@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, Video, Loader2, CalendarPlus, Ban, Trash2 } from "lucide-react";
 import { useSession } from "@/components/auth/RoleContext";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type ClassItem = {
   id: string;
@@ -42,13 +43,13 @@ export default function ClassesPage() {
   const isHead = role === "HEAD";
 
   async function load() {
-    const d = await fetch("/api/classes").then((r) => r.json());
+    const d = await fetchWithAuth("/api/classes").then((r) => r.json());
     if (d.success) setBuckets({ ongoing: d.ongoing ?? [], upcoming: d.upcoming ?? [], ended: d.ended ?? [] });
   }
 
   useEffect(() => {
     let active = true;
-    fetch("/api/classes")
+    fetchWithAuth("/api/classes")
       .then((r) => r.json())
       .then((d) => {
         if (!active || !d.success) return;
@@ -65,7 +66,7 @@ export default function ClassesPage() {
     if (!confirm(`Cancel "${item.title}"? Everyone enrolled will be told it is off.`)) return;
     setBusy(item.id);
     try {
-      await fetch(`/api/classes/${item.id}`, {
+      await fetchWithAuth(`/api/classes/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "CANCELLED" }),
@@ -80,7 +81,7 @@ export default function ClassesPage() {
     if (!confirm(`Delete "${item.title}" permanently? Cancelling is usually the right choice.`)) return;
     setBusy(item.id);
     try {
-      await fetch(`/api/classes/${item.id}`, { method: "DELETE" });
+      await fetchWithAuth(`/api/classes/${item.id}`, { method: "DELETE" });
       await load();
     } finally {
       setBusy(null);

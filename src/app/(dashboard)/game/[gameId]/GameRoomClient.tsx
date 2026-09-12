@@ -11,6 +11,7 @@ import GameClock from "@/components/chess/GameClock";
 import MoveList from "@/components/chess/MoveList";
 import GameControls from "@/components/chess/GameControls";
 import { type GameState } from "@/lib/socket/gameEngine";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type PlayerInfo = {
   username: string;
@@ -105,7 +106,7 @@ export default function GameRoomClient({
       try {
         // Increasing delay to let DB write complete
         await new Promise((resolve) => setTimeout(resolve, 800 + attempt * 600));
-        const res = await fetch(`/api/games/${gameId}`);
+        const res = await fetchWithAuth(`/api/games/${gameId}`);
         // The route answers { success:false, message } on 401/404 — there is no
         // `game` key to read, and retrying an auth failure never recovers.
         // 404 also means "not yours to read" (spectators): retrying never recovers.

@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket/client";
 import { useMediaRoom, type RemoteStream } from "@/lib/media/roomClient";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type ChatMessage = { id: string; userId: string; username: string; body: string; createdAt: string };
 type RosterEntry = { userId: string; username: string };
@@ -36,7 +37,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/classes/${id}/room`);
+    const res = await fetchWithAuth(`/api/classes/${id}/room`);
     const data = await res.json();
     if (!res.ok || !data.success) {
       setError(data.message ?? "Could not open this room.");
@@ -106,7 +107,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   async function toggleLive(action: "start" | "end") {
     setBusy(true);
     try {
-      const res = await fetch(`/api/classes/${id}/room`, {
+      const res = await fetchWithAuth(`/api/classes/${id}/room`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -296,7 +297,7 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/attendance?classId=${encodeURIComponent(classId)}`);
+      const res = await fetchWithAuth(`/api/attendance?classId=${encodeURIComponent(classId)}`);
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not load the roster.");
@@ -329,7 +330,7 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
 
   const loadAddable = useCallback(async () => {
     try {
-      const res = await fetch("/api/students");
+      const res = await fetchWithAuth("/api/students");
       const data = await res.json();
       if (!res.ok || !data.success) return;
       // /api/students is already scoped to what this caller may see — a coach's
@@ -348,7 +349,7 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/classes/${encodeURIComponent(classId)}/enroll`, {
+      const res = await fetchWithAuth(`/api/classes/${encodeURIComponent(classId)}/enroll`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // An explicit pick wins; otherwise the typed name is resolved server-side.
@@ -378,7 +379,7 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/attendance", {
+      const res = await fetchWithAuth("/api/attendance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ classId, entries }),

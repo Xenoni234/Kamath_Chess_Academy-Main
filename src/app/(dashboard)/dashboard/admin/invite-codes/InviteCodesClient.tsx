@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type InviteCode = {
   id: string;
@@ -42,7 +43,7 @@ export default function InviteCodesClient() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/admin/invite-codes?status=${filter}`);
+      const res = await fetchWithAuth(`/api/admin/invite-codes?status=${filter}`);
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not load invite codes.");
@@ -69,7 +70,7 @@ export default function InviteCodesClient() {
     setError(null);
     setCopied(false);
     try {
-      const res = await fetch("/api/admin/invite-codes", {
+      const res = await fetchWithAuth("/api/admin/invite-codes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,7 +95,7 @@ export default function InviteCodesClient() {
   async function revoke(id: string) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/invite-codes/${id}`, { method: "DELETE" });
+      const res = await fetchWithAuth(`/api/admin/invite-codes/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not withdraw that code.");

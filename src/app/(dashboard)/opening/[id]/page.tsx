@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Chess } from "chess.js";
 import ChessBoard from "@/components/chess/ChessBoard";
 import Markdown from "@/components/common/Markdown";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Line = {
   moves: string[];
@@ -70,7 +71,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/opening/${id}`);
+      const res = await fetchWithAuth(`/api/opening/${id}`);
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Not found");
@@ -158,7 +159,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
     setExplaining(true);
     setExplanation("");
     try {
-      const res = await fetch("/api/analysis/explain", {
+      const res = await fetchWithAuth("/api/analysis/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Position before the move, plus the move. The server searches it and
@@ -197,7 +198,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
     if (!rep) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/opening/${id}/save`, { method: rep.saved ? "DELETE" : "POST" });
+      const res = await fetchWithAuth(`/api/opening/${id}/save`, { method: rep.saved ? "DELETE" : "POST" });
       const data = await res.json();
       if (data.success) setRep({ ...rep, saved: data.saved });
     } finally {
@@ -208,7 +209,7 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
   async function regenerate() {
     setBusy(true);
     try {
-      const res = await fetch(`/api/opening/${id}/regenerate`, { method: "POST" });
+      const res = await fetchWithAuth(`/api/opening/${id}/regenerate`, { method: "POST" });
       if (res.ok) {
         await load();
         if (pollRef.current) clearTimeout(pollRef.current);

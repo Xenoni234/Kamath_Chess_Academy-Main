@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Payment = {
   id: string;
@@ -43,7 +44,7 @@ export default function AdminPaymentsClient() {
   const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (statusFilter) params.set("status", statusFilter);
-    const [pRes, sRes] = await Promise.all([fetch(`/api/payments?${params}`), fetch("/api/students")]);
+    const [pRes, sRes] = await Promise.all([fetchWithAuth(`/api/payments?${params}`), fetchWithAuth("/api/students")]);
     const [pData, sData] = await Promise.all([pRes.json(), sRes.json()]);
     if (pData.success) setPayments(pData.payments);
     else setError(pData.message ?? "Could not load fees.");
@@ -62,7 +63,7 @@ export default function AdminPaymentsClient() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/payments", {
+      const res = await fetchWithAuth("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -89,7 +90,7 @@ export default function AdminPaymentsClient() {
   async function settle(id: string) {
     setBusy(true);
     try {
-      await fetch(`/api/payments/${id}`, {
+      await fetchWithAuth(`/api/payments/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "COMPLETED" }),

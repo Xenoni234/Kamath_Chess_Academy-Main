@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type LinkedChild = { student: { id: string; username: string } };
 type User = {
@@ -34,7 +35,7 @@ export default function AdminUsersClient({ viewerRole }: { viewerRole: string })
     const params = new URLSearchParams();
     if (roleFilter) params.set("role", roleFilter);
     if (q.trim()) params.set("q", q.trim());
-    const res = await fetch(`/api/admin/users?${params}`);
+    const res = await fetchWithAuth(`/api/admin/users?${params}`);
     const data = await res.json();
     if (data.success) setUsers(data.users);
     else setMessage({ tone: "err", text: data.message ?? "Could not load accounts." });
@@ -52,7 +53,7 @@ export default function AdminUsersClient({ viewerRole }: { viewerRole: string })
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/users", {
+      const res = await fetchWithAuth("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -80,7 +81,7 @@ export default function AdminUsersClient({ viewerRole }: { viewerRole: string })
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await fetchWithAuth(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -101,7 +102,7 @@ export default function AdminUsersClient({ viewerRole }: { viewerRole: string })
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/parent-links", {
+      const res = await fetchWithAuth("/api/admin/parent-links", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(link),

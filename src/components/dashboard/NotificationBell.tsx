@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Check } from "lucide-react";
 import { getSocket } from "@/lib/socket/client";
 import { cn } from "@/lib/utils";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Notification = {
   id: string;
@@ -63,7 +64,7 @@ export default function NotificationBell() {
 
     async function load() {
       try {
-        const res = await fetch("/api/notifications");
+        const res = await fetchWithAuth("/api/notifications");
         const data = await res.json();
         if (cancelled || !data.success) return;
         setItems(data.notifications);
@@ -99,7 +100,7 @@ export default function NotificationBell() {
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
     setUnread((u) => Math.max(0, u - 1));
     try {
-      await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+      await fetchWithAuth(`/api/notifications/${id}/read`, { method: "POST" });
     } catch {
       // Optimistic — the next poll reconciles.
     }
@@ -109,7 +110,7 @@ export default function NotificationBell() {
     setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
     setUnread(0);
     try {
-      await fetch("/api/notifications/read-all", { method: "POST" });
+      await fetchWithAuth("/api/notifications/read-all", { method: "POST" });
     } catch {
       // Optimistic.
     }

@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SOURCE_LABEL } from "@/lib/second/types";
 import type { OpponentSource } from "@/lib/second/types";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 const POLL_INTERVAL_MS = 4000;
 /** Profiling runs engine analysis over many positions; allow a long window. */
@@ -333,7 +334,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
   const load = useCallback(async (): Promise<Profile | null> => {
     try {
-      const res = await fetch(`/api/second/profiles/${id}`);
+      const res = await fetchWithAuth(`/api/second/profiles/${id}`);
       const data = await res.json();
       if (!data.success) {
         setError(data.message ?? "Could not load this dossier.");
@@ -389,7 +390,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
     // The server rejects the duplicates now, but not queuing them is better.
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/second/profiles/${id}/regenerate`, { method: "POST" });
+      const res = await fetchWithAuth(`/api/second/profiles/${id}/regenerate`, { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.success) {
         setRegenError(data.message ?? "Could not start the regeneration.");
@@ -408,7 +409,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
     setRegenError(null);
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/second/profiles/${id}`, { method: "DELETE" });
+      const res = await fetchWithAuth(`/api/second/profiles/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok || !data.success) {
         setRegenError(data.message ?? "Could not delete this dossier.");

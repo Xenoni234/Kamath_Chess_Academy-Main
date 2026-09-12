@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type ContactMessage = {
   id: string;
@@ -38,7 +39,7 @@ export default function AdminContactClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/contact?handled=${filter}`);
+      const res = await fetchWithAuth(`/api/admin/contact?handled=${filter}`);
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not load enquiries.");
@@ -63,7 +64,7 @@ export default function AdminContactClient() {
   async function setHandled(id: string, handled: boolean) {
     setBusyId(id);
     try {
-      const res = await fetch(`/api/admin/contact/${id}`, {
+      const res = await fetchWithAuth(`/api/admin/contact/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ handled }),
