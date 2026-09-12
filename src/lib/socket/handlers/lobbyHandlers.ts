@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../../db.ts";
 import { redis } from "../../redis.ts";
 import { createGame, deriveFormat, saveGameToRedis, type GameState } from "../gameEngine.ts";
-import type { ConnectedUsers } from "../server.ts";
 import { challengeIdSchema, createChallengeSchema, quickPairSchema } from "../../validations/socket.ts";
 
 type Challenge = {
@@ -33,16 +32,6 @@ async function broadcastChallenges(io: Server) {
   io.emit("lobby:challenges", await getChallenges());
 }
 
-function getSocketIdForUser(connectedUsers: ConnectedUsers, userId: string) {
-  for (const [socketId, connectedUserId] of connectedUsers) {
-    if (connectedUserId === userId) {
-      return socketId;
-    }
-  }
-
-  return null;
-}
-
 function assignColors(creatorId: string, accepterId: string, color: Challenge["color"]) {
   if (color === "white") return { whiteId: creatorId, blackId: accepterId };
   if (color === "black") return { whiteId: accepterId, blackId: creatorId };
@@ -51,21 +40,30 @@ function assignColors(creatorId: string, accepterId: string, color: Challenge["c
     : { whiteId: accepterId, blackId: creatorId };
 }
 
-async function emitGameReady(io: Server, connectedUsers: ConnectedUsers, game: GameState) {
+/**
+ * Put BOTH players in the game and tell EVERY socket they have.
+ *
+ * This used to resolve a single socket id per player out of `connectedUsers`
+ * and emit only to that one. But `connectedUsers` is keyed by socket id, so a
+ * player with two sockets — two tabs, a phone and a laptop, or a reconnect
+ * whose old entry has not been swept yet — has two entries, and the lookup
+ * returns whichever connected FIRST. Measured in production: shiv accepted a
+ * challenge, the creator was moved into the game, and the accepter was left
+ * sitting in the lobby, because `lobby:game-ready` had been delivered to
+ * shiv's other socket.
+ *
+ * Every socket joins `user:<id>` at connection time, so addressing that room
+ * reaches all of a player's sockets and needs no map at all. `socketsJoin`
+ * likewise moves all of them into the game room, so a second tab still
+ * receives the live game rather than sitting inert.
+ */
+async function emitGameReady(io: Server, game: GameState) {
   const room = `game:${game.gameId}`;
-  const whiteSocketId = getSocketIdForUser(connectedUsers, game.white);
-  const blackSocketId = getSocketIdForUser(connectedUsers, game.black);
 
-  if (whiteSocketId) {
-    const whiteSocket = io.sockets.sockets.get(whiteSocketId);
-    whiteSocket?.join(room);
-    whiteSocket?.emit("lobby:game-ready", { gameId: game.gameId });
-  }
-
-  if (blackSocketId) {
-    const blackSocket = io.sockets.sockets.get(blackSocketId);
-    blackSocket?.join(room);
-    blackSocket?.emit("lobby:game-ready", { gameId: game.gameId });
+  for (const userId of [game.white, game.black]) {
+    const userRoom = `user:${userId}`;
+    io.in(userRoom).socketsJoin(room);
+    io.to(userRoom).emit("lobby:game-ready", { gameId: game.gameId });
   }
 }
 
@@ -78,7 +76,7 @@ async function getRating(userId: string, format: keyof typeof TimeFormat) {
   return rating?.rating ?? 1500;
 }
 
-export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: ConnectedUsers) {
+export function setupLobbyHandlers(io: Server, socket: Socket) {
   void getChallenges().then((challenges) => {
     socket.emit("lobby:challenges", challenges);
   }).catch((err) => console.error("Failed to broadcast challenges:", err));
@@ -146,7 +144,7 @@ export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: C
 
     await saveGameToRedis(game);
     await redis.hdel(CHALLENGES_KEY, challenge.challengeId);
-    await emitGameReady(io, connectedUsers, game);
+    await emitGameReady(io, game);
     await broadcastChallenges(io);
   });
 
@@ -178,7 +176,7 @@ export function setupLobbyHandlers(io: Server, socket: Socket, connectedUsers: C
     });
 
     await saveGameToRedis(game);
-    await emitGameReady(io, connectedUsers, game);
+    await emitGameReady(io, game);
   });
 
   socket.on("lobby:cancel-quick-pair", async (rawPayload: unknown) => {

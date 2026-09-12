@@ -68,7 +68,7 @@ export function setupSocketServer(io: Server) {
     socket.join(`user:${payload.userId}`);
 
     setupPresenceHandlers(io, socket, connectedUsers);
-    setupLobbyHandlers(io, socket, connectedUsers);
+    setupLobbyHandlers(io, socket);
     setupGameHandlers(io, socket);
     setupTournamentHandlers(io, socket);
     setupClassHandlers(io, socket);
