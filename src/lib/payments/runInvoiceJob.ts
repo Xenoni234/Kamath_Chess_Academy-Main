@@ -97,9 +97,21 @@ export async function runInvoiceJob(data: InvoiceJobData): Promise<void> {
       status: payment.status,
     });
 
-    const pdfPath = path.join("/tmp", `invoice-${invoiceId}.pdf`);
-    await fs.writeFile(pdfPath, pdf);
-    await db.invoice.update({ where: { id: invoiceId }, data: { pdfUrl: pdfPath } });
+    // The row is the durable copy. /tmp is only a same-instance convenience and is wiped
+    // on every redeploy, so a disk failure here must not lose the invoice.
+    let pdfPath: string | null = null;
+    try {
+      const candidate = path.join("/tmp", `invoice-${invoiceId}.pdf`);
+      await fs.writeFile(candidate, pdf);
+      pdfPath = candidate;
+    } catch (error) {
+      console.error("[invoice] PDF cache write failed (the row still has it):", error);
+    }
+    await db.invoice.update({
+      where: { id: invoiceId },
+      // Prisma's Bytes wants a plain Uint8Array, not a Node Buffer.
+      data: { pdf: new Uint8Array(pdf), pdfUrl: pdfPath },
+    });
 
     const emailed = await sendEmail({
       to: payment.user.email,

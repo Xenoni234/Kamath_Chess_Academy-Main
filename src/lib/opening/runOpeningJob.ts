@@ -116,12 +116,23 @@ async function runOpeningJobInner(data: OpeningJobData): Promise<void> {
 
     // 7. PDF (degrades to null — the repertoire is still saved).
     let pdfPath: string | null = null;
+    let pdfBytes: Uint8Array<ArrayBuffer> | null = null;
     try {
       const pdf = await renderOpeningPdf(artifact, lines, guide);
-      pdfPath = path.join("/tmp", `opening-${repertoireId}.pdf`);
-      await fs.writeFile(pdfPath, pdf);
+      pdfBytes = new Uint8Array(pdf);
+
+      // /tmp is only a convenience for this instance now; the row is the real copy, so a
+      // disk failure here must not discard the PDF that was just rendered successfully.
+      try {
+        const candidate = path.join("/tmp", `opening-${repertoireId}.pdf`);
+        await fs.writeFile(candidate, pdf);
+        pdfPath = candidate;
+      } catch (error) {
+        console.error("[opening] PDF cache write failed (the row still has it):", error);
+      }
     } catch (error) {
       console.error("[opening] PDF generation failed:", error);
+      pdfBytes = null;
       pdfPath = null;
     }
     mark("pdf");
@@ -135,6 +146,7 @@ async function runOpeningJobInner(data: OpeningJobData): Promise<void> {
         artifact: artifact as unknown as object,
         linesJson: lines as unknown as object,
         summary: guide,
+        pdf: pdfBytes,
         pdfUrl: pdfPath,
       },
     });
