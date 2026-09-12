@@ -85,12 +85,30 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Reusable Component Classes */
+/*
+ * The `disabled:` rules are not decoration — they close a real usability bug.
+ *
+ * Neither button styled its disabled state, and both hard-coded
+ * `cursor-pointer`. A disabled button therefore rendered at full-brightness
+ * cyan with a pointer cursor: indistinguishable from a live one. Across the app
+ * that is 19 buttons which look pressable and silently do nothing, and a real
+ * user hit one on the Opening Trainer and reported it as "onclick not working".
+ * They were describing the interface accurately.
+ *
+ * Fixing it here rather than per-button means every existing disabled state,
+ * and every one written later, is honest by default. Enabled buttons are
+ * untouched.
+ */
 .btn-primary {
-  @apply bg-kca-cyan text-kca-black font-display font-bold px-6 py-3 rounded-lg transition-all duration-300 hover:bg-kca-cyan-bright shadow-[0_0_20px_rgba(0,200,232,0.15)] hover:shadow-[0_0_30px_rgba(0,200,232,0.30)] flex items-center justify-center gap-2 cursor-pointer;
+  @apply bg-kca-cyan text-kca-black font-display font-bold px-6 py-3 rounded-lg transition-all duration-300 hover:bg-kca-cyan-bright shadow-[0_0_20px_rgba(0,200,232,0.15)] hover:shadow-[0_0_30px_rgba(0,200,232,0.30)] flex items-center justify-center gap-2 cursor-pointer
+         disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none
+         disabled:hover:bg-kca-cyan disabled:hover:shadow-none;
 }
 
 .btn-secondary {
-  @apply border border-kca-cyan text-kca-cyan font-display font-semibold px-6 py-3 rounded-lg bg-transparent transition-all duration-300 hover:bg-kca-cyan/10 flex items-center justify-center gap-2 cursor-pointer;
+  @apply border border-kca-cyan text-kca-cyan font-display font-semibold px-6 py-3 rounded-lg bg-transparent transition-all duration-300 hover:bg-kca-cyan/10 flex items-center justify-center gap-2 cursor-pointer
+         disabled:opacity-45 disabled:cursor-not-allowed
+         disabled:hover:bg-transparent;
 }
 
 .card {

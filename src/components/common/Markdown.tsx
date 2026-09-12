@@ -15,8 +15,44 @@ import { Fragment, type ReactNode } from "react";
  * directly avoids `dangerouslySetInnerHTML` on model-generated text entirely.
  */
 
-/** `**bold**`, `*italic*` and `` `code` `` inside a line of text. */
+/**
+ * HTML the model emits, which this renderer must not print literally.
+ *
+ * The guide is markdown by instruction, but a language model will still reach
+ * for `<br>` when it wants a line break inside a table cell — and because
+ * nothing here uses `dangerouslySetInnerHTML` (deliberately: this is
+ * model-generated text), those tags landed on screen as the characters
+ * `<br>`, in the middle of the opening lines. Real users saw
+ * `(a) Engine-best line<br> 1 f4 d5 ...`.
+ *
+ * So: turn break tags into real breaks, and drop any other stray tag rather
+ * than rendering it. Dropping is right — an unexpected `<script>` or `<img>`
+ * from a model has no business being shown as text OR as markup.
+ */
+const BREAK_TAG = /<\s*br\s*\/?\s*>/gi;
+const ANY_TAG = /<\/?[a-zA-Z][^>]*>/g;
+
+/** `**bold**`, `*italic*`, `` `code` `` and model-emitted `<br>` in a line. */
 function inline(text: string, keyBase: string): ReactNode[] {
+  // Normalise break tags to newlines first, then strip anything else that looks
+  // like a tag. Order matters: stripping first would eat the breaks.
+  const cleaned = text.replace(BREAK_TAG, "\n").replace(ANY_TAG, "");
+
+  // A line that contained a break becomes several lines with <br/> between them.
+  if (cleaned.includes("\n")) {
+    const parts = cleaned.split("\n");
+    const out: ReactNode[] = [];
+    parts.forEach((part, pi) => {
+      if (pi > 0) out.push(<br key={`${keyBase}-br${pi}`} />);
+      out.push(...inline(part, `${keyBase}-l${pi}`));
+    });
+    return out;
+  }
+
+  return inlineTokens(cleaned, keyBase);
+}
+
+function inlineTokens(text: string, keyBase: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*)/g;
   let cursor = 0;
