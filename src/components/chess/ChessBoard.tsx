@@ -13,7 +13,18 @@ export type BoardArrow = {
 type ChessBoardProps = {
   fen: string;
   orientation: "white" | "black";
-  onMove: (from: string, to: string, promotion?: string) => void;
+  /**
+   * Called when a legal move is dropped. Return `false` to REJECT it — the piece snaps
+   * back and the board stays on `fen`.
+   *
+   * Returning nothing means "accepted", which is what every caller that drives `fen`
+   * from the move itself wants. The puzzle page needs the other answer: a wrong guess is
+   * legal chess but must not move the piece, and without a way to say so the board kept
+   * the piece on the dropped square while `fen` still held the real position. That went
+   * unnoticed while a wrong move locked the board; it stopped being invisible the moment
+   * the board stayed live so students could try again.
+   */
+  onMove: (from: string, to: string, promotion?: string) => void | boolean;
   disabled?: boolean;
   lastMove?: string;
   /** Overlay arrows — the analysis board uses these for the engine's best move. */
@@ -106,8 +117,7 @@ export default function ChessBoard({
       return false; // wait for promotion-piece selection before committing
     }
 
-    onMove(sourceSquare, targetSquare);
-    return true;
+    return onMove(sourceSquare, targetSquare) !== false;
   };
 
   const handlePromote = (pieceType: "q" | "r" | "b" | "n") => {

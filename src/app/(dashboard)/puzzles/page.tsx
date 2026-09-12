@@ -239,7 +239,12 @@ export default function PuzzlesPage() {
   }, []);
 
   const handleMove = (from: string, to: string, promotion?: string) => {
-    if (statusRef.current !== "solving" || boardLocked) return;
+    // "retrying" MUST be accepted here, not just by the board's `disabled` prop. It was
+    // not, and that silently un-shipped the whole retry feature: after a wrong move the
+    // board looked live and pieces could be dragged, but every move returned on this line
+    // and nothing ever happened. The two places that decide whether a move is allowed
+    // have to agree — see `disabled` below, which lists the same two statuses.
+    if ((statusRef.current !== "solving" && statusRef.current !== "retrying") || boardLocked) return;
 
     const expected = solutionRef.current[idxRef.current];
     const exp = uciToMove(expected);
@@ -254,7 +259,9 @@ export default function PuzzlesPage() {
       // stays live so the student can actually work it out.
       void submitAttempt(false);
       setStatus("retrying");
-      return;
+      // Reject the drop: the guess was legal chess, but the puzzle position must not
+      // change, so the piece snaps back and the student tries again from what they see.
+      return false;
     }
 
     // Correct player move — apply it.
