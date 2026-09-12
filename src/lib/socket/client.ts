@@ -53,7 +53,22 @@ async function reauthenticateAndReconnect() {
 export function getSocket(): Socket {
   if (socket) return socket;
 
-  socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || undefined, {
+  // SAME ORIGIN, ALWAYS — never an absolute URL from an env var.
+  //
+  // Socket.io is attached to the very server that served this page
+  // (`server.mjs`), so it can never live on another origin, and naming one
+  // could only ever be wrong. It was wrong: the build hardcoded the apex,
+  // Caddy serves `www.` too with no redirect, and Safari hides the `www.`
+  // prefix — so a user on www loaded the page fine (same-site cookie, top-level
+  // navigation) while every socket request became cross-origin and was refused:
+  //
+  //   blocked by CORS policy: 'Access-Control-Allow-Origin' has a value
+  //   'https://kamathchessacademy.com' that is not equal to the supplied origin
+  //
+  // socket.io retried forever, so presence never arrived and no one could be
+  // paired. Passing `undefined` connects to `window.location.origin`, which is
+  // correct on apex, on www, on localhost, and on any future hostname.
+  socket = io(undefined, {
     withCredentials: true,
   });
 

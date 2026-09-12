@@ -45,9 +45,28 @@ app.prepare().then(async () => {
     throw new Error('NEXT_PUBLIC_APP_URL must be set in production (Socket.io CORS origin)')
   }
 
+  // Accept the apex AND the www host. Caddy serves both, so whichever one the
+  // visitor happens to be on is the origin the browser will send. Naming only
+  // one of them made every socket from the other host fail CORS — silently,
+  // forever, because socket.io just keeps retrying.
+  //
+  // The client now connects same-origin, which makes CORS irrelevant for the
+  // browser. This stays as the belt to that pair of braces: anything still
+  // using an absolute URL, and any non-browser client, keeps working.
+  const withWwwVariant = (url) => {
+    try {
+      const u = new URL(url)
+      const host = u.host.startsWith('www.') ? u.host.slice(4) : `www.${u.host}`
+      return [u.origin, `${u.protocol}//${host}`]
+    } catch {
+      return [url]
+    }
+  }
+  const allowedOrigins = withWwwVariant(appUrl || 'http://localhost:3000')
+
   const io = new Server(httpServer, {
     cors: {
-      origin: appUrl || 'http://localhost:3000',
+      origin: allowedOrigins,
       credentials: true
     }
   })
