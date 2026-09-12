@@ -149,7 +149,7 @@ export default function NotificationBell() {
                 }
               : undefined
           }
-          className="fixed z-[60] w-72 overflow-y-auto rounded-xl border border-kca-border bg-kca-surface shadow-cyan-md"
+          className="fixed z-[60] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-kca-border bg-kca-surface shadow-cyan-md"
         >
           <div className="sticky top-0 flex items-center justify-between border-b border-kca-border bg-kca-surface px-4 py-2.5">
             <span className="text-xs font-bold uppercase tracking-wider text-kca-gray-400">Notifications</span>

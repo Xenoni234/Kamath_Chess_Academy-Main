@@ -200,7 +200,13 @@ export default function TournamentDetailPage() {
         {standings.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-kca-gray-400">No players yet.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            {/* The only standings table that was not wrapped. Its three cells
+                carry px-5 on each side, plus w-12 and w-20 fixed columns —
+                roughly 370px before the player's name gets a pixel, so it ran
+                off the right edge of a 360px phone. Every other table in the
+                app already scrolls inside its own container. */}
+            <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wider text-kca-gray-500">
                 <th className="px-5 py-2 font-medium w-12">#</th>
@@ -217,7 +223,8 @@ export default function TournamentDetailPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         )}
       </div>
     </div>
