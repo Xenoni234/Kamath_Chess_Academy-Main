@@ -108,6 +108,35 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
   const safePly = Math.min(ply, maxPly);
   const orientation = rep?.colorToPlay ?? "white";
 
+  /**
+   * Arrow keys step through the line, same as the analysis board.
+   *
+   * This page had no keyboard handling at all, so the only way through a twenty-move
+   * repertoire line was clicking the small ◀ ▶ buttons once per move — which is exactly
+   * the sort of thing you do fifty times while studying an opening.
+   *
+   * Typing is left alone (the coach panel has inputs), and preventDefault stops the arrows
+   * also scrolling the page while you step.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (target?.isContentEditable) return;
+
+      if (event.key === "ArrowLeft") setPly((current) => Math.max(0, Math.min(maxPly, current) - 1));
+      else if (event.key === "ArrowRight") setPly((current) => Math.min(maxPly, current + 1));
+      else if (event.key === "Home") setPly(0);
+      else if (event.key === "End") setPly(maxPly);
+      else return;
+
+      event.preventDefault();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [maxPly]);
+
   /** Switch variation, rewinding the board and dropping the old explanation.
    *  Done here rather than in an effect on `selected` — resetting state from an
    *  effect triggers a second render pass for every click. */

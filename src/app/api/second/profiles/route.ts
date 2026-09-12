@@ -40,6 +40,9 @@ export async function GET(request: NextRequest) {
         status: true,
         gamesAnalyzed: true,
         createdAt: true,
+        // The client shows how long a build has been running; without this it could only
+        // ever show age-since-created, which keeps counting after the job has finished.
+        updatedAt: true,
         // `handle`/`source` are still returned above: pre-multi-account rows
         // have no `accounts` rows at all, and an older client reads them.
         accounts: {

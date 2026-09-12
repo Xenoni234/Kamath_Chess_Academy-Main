@@ -1,6 +1,9 @@
 import LegalDoc, { Clause } from "@/components/public/LegalDoc";
 
-export const metadata = { title: "Terms of Service | Kamath Chess Academy" };
+export const metadata = {
+  title: "Terms of Service",
+  description: "The terms that apply when you use Kamath Chess Academy's coaching platform.",
+};
 
 export default function TermsPage() {
   return (

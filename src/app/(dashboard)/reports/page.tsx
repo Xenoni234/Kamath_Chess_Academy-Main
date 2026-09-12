@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Download, Eye, FileText, Loader2, Plus, X } from "lucide-react";
+import { AlertCircle, Download, Eye, FileText, Loader2, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ReportStatus = "pending" | "processing" | "complete" | "failed";
@@ -37,6 +37,7 @@ const STATUS_LABELS: Record<ReportStatus, string> = {
 
 export default function ReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -159,6 +160,27 @@ export default function ReportsPage() {
     }
   };
 
+  /**
+   * Delete a report. Removed from the list straight away, and put back if the server says
+   * no — a student should not have to wonder whether the tap registered.
+   */
+  const deleteReport = async (id: string) => {
+    if (!confirm("Delete this report? You can always make a new one.")) return;
+
+    const previous = reports;
+    setDeletingId(id);
+    setReports((rows) => rows.filter((r) => r.id !== id));
+
+    try {
+      const res = await fetch(`/api/reports/${id}`, { method: "DELETE" });
+      if (!res.ok) setReports(previous);
+    } catch {
+      setReports(previous);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="w-full max-w-5xl mx-auto">
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
@@ -255,9 +277,28 @@ export default function ReportsPage() {
                           <Download className="w-4 h-4" />
                           Save
                         </a>
+                        <button
+                          type="button"
+                          onClick={() => void deleteReport(report.id)}
+                          disabled={deletingId === report.id}
+                          title="Delete this report"
+                          className="inline-flex items-center gap-1.5 text-xs text-kca-gray-400 hover:text-kca-danger disabled:opacity-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
                       </div>
                     ) : (
-                      <span className="text-kca-gray-600">—</span>
+                      <button
+                        type="button"
+                        onClick={() => void deleteReport(report.id)}
+                        disabled={deletingId === report.id}
+                        title="Delete this report"
+                        className="inline-flex items-center gap-1.5 text-xs text-kca-gray-400 hover:text-kca-danger disabled:opacity-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
                     )}
                   </td>
                 </tr>

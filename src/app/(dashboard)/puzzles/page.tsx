@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chess } from "chess.js";
-import { CheckCircle2, XCircle, Loader2, ArrowRight, Puzzle as PuzzleIcon, Target, Flame, Award, Trophy } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, XCircle, Loader2, ArrowRight, Puzzle as PuzzleIcon, Target, Flame, Award, Trophy, Eye, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sanForUci } from "@/lib/engine/analysis";
 import ChessBoard from "@/components/chess/ChessBoard";
 
 type PuzzleData = {
@@ -15,7 +17,12 @@ type PuzzleData = {
   source?: string;
 };
 
-type Status = "loading" | "solving" | "solved" | "failed" | "error";
+/**
+ * "retrying" is the Lichess behaviour: the first wrong move takes the penalty, and then
+ * you keep working at the same puzzle. "failed" now means only "I gave up and asked to be
+ * shown the answer" — the board is locked and the solution is on screen.
+ */
+type Status = "loading" | "solving" | "retrying" | "solved" | "failed" | "error";
 
 const DIFFICULTIES = [
   { label: "All levels", min: 800, max: 2800 },
@@ -241,9 +248,12 @@ export default function PuzzlesPage() {
     if (!correct) {
       setWrongFlash(true);
       window.setTimeout(() => setWrongFlash(false), 500);
-      setBestMove(expected);
-      setStatus("failed");
+      // The penalty lands once and once only: `submitAttempt` is guarded by
+      // `submittedRef`, so every later try on this puzzle records nothing further. The
+      // answer is NOT shown — revealing it here made retrying pointless — and the board
+      // stays live so the student can actually work it out.
       void submitAttempt(false);
+      setStatus("retrying");
       return;
     }
 
@@ -286,7 +296,32 @@ export default function PuzzlesPage() {
     }, 400);
   };
 
-  const disabled = boardLocked || (status !== "solving");
+  /**
+   * Give up and be shown the move — the only way to reach "failed" now.
+   *
+   * The move is converted to chess notation before it is shown. It used to be printed as
+   * the raw coordinates the Lichess dataset stores, so a nine-year-old was told
+   * "Best move was c4f1" instead of "Bf1". `chessRef` is untouched by a wrong move, so its
+   * FEN is exactly the position the move is played from.
+   */
+  const revealSolution = () => {
+    const expected = solutionRef.current[idxRef.current];
+    if (expected) {
+      let shown = expected;
+      try {
+        shown = sanForUci(chessRef.current.fen(), expected) || expected;
+      } catch {
+        // Fall back to the raw move rather than showing nothing.
+      }
+      setBestMove(shown);
+    }
+    // Taking the answer counts as the same single failure, so this is a no-op if the
+    // student already played a wrong move.
+    void submitAttempt(false);
+    setStatus("failed");
+  };
+
+  const disabled = boardLocked || (status !== "solving" && status !== "retrying");
 
   return (
     <div className="w-full max-w-6xl mx-auto">
@@ -411,13 +446,25 @@ export default function PuzzlesPage() {
                 </div>
               </div>
             )}
+            {status === "retrying" && (
+              <div className="flex items-center gap-3 text-kca-warning">
+                <XCircle className="w-6 h-6 shrink-0" />
+                <div>
+                  <div className="font-bold text-lg">Not that one — try again</div>
+                  <div className="text-xs text-kca-gray-400 mt-0.5">
+                    Keep looking, you can move as many times as you like. You&apos;ll see this
+                    puzzle again later to practise it.
+                  </div>
+                </div>
+              </div>
+            )}
             {status === "failed" && (
               <div className="flex items-center gap-3 text-kca-danger">
                 <XCircle className="w-6 h-6 shrink-0" />
                 <div>
-                  <div className="font-bold text-lg">Incorrect</div>
+                  <div className="font-bold text-lg">The answer was {bestMove}</div>
                   <div className="text-xs text-kca-gray-400 mt-0.5">
-                    Best move was <span className="font-mono text-kca-white">{bestMove}</span>. You&apos;ll see this one again sooner.
+                    Have a look at why it works, then try the next one.
                   </div>
                 </div>
               </div>
@@ -427,14 +474,36 @@ export default function PuzzlesPage() {
           </div>
 
           {/* Controls */}
-          <button
-            onClick={() => void loadPuzzle()}
-            disabled={status === "loading"}
-            className="btn-primary w-full py-3 font-bold disabled:opacity-50"
-          >
-            {status === "solving" ? "Skip Puzzle" : "Next Puzzle"}
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="space-y-2">
+            {status === "retrying" && (
+              <button
+                onClick={revealSolution}
+                className="btn-secondary w-full py-3 font-bold"
+              >
+                <Eye className="w-4 h-4" />
+                Show me the answer
+              </button>
+            )}
+
+            {(status === "solved" || status === "failed") && puzzle && (
+              <Link
+                href={`/dashboard/analysis?fen=${encodeURIComponent(puzzle.fen)}`}
+                className="btn-secondary w-full py-3 font-bold"
+              >
+                <Activity className="w-4 h-4" />
+                Look at this position
+              </Link>
+            )}
+
+            <button
+              onClick={() => void loadPuzzle()}
+              disabled={status === "loading"}
+              className="btn-primary w-full py-3 font-bold disabled:opacity-50"
+            >
+              {status === "solving" || status === "retrying" ? "Skip Puzzle" : "Next Puzzle"}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

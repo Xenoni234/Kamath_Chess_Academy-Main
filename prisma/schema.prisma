@@ -659,6 +659,10 @@ model OpponentAccount {
 model RepertoirePlan {
   id        String          @id @default(cuid())
   profileId String
+  /// The dossier PDF itself. Same reason as GameReport.pdf: /tmp is wiped on every
+  /// redeploy, so the download degraded to "this dossier's file has expired".
+  pdf       Bytes?
+  /// Legacy /tmp path, kept so older rows still resolve if the file survived.
   pdfUrl    String?
   summary   String          @db.Text
   linesJson Json
