@@ -50,12 +50,32 @@ export default function PlayLobbyClient({ userId, allUsers }: PlayLobbyClientPro
   const [onlineUserIds, setOnlineUserIds] = useState<string[]>([userId]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [searchingTimeControl, setSearchingTimeControl] = useState<string | null>(null);
+  // null = not yet known. The lobby used to render a locally seeded
+  // "1 Player Online" and an eternal "Searching for opponent…" while the socket
+  // was dead, so a broken session was indistinguishable from an empty lobby.
+  const [connected, setConnected] = useState<boolean | null>(null);
 
   // Challenge modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createTimeControl, setCreateTimeControl] = useState("5+3");
   const [createColor, setCreateColor] = useState<"white" | "black" | "random">("random");
   const [createRated, setCreateRated] = useState(true);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const sync = () => setConnected(socket.connected);
+    socket.on("connect", sync);
+    socket.on("disconnect", sync);
+    // Seeded on a timer rather than inline: reading it synchronously here would
+    // be a setState in the effect body, and the socket may already be connected
+    // from a previous page, in which case no `connect` event is coming.
+    const seed = setTimeout(sync, 0);
+    return () => {
+      clearTimeout(seed);
+      socket.off("connect", sync);
+      socket.off("disconnect", sync);
+    };
+  }, []);
 
   useEffect(() => {
     const socket = getSocket();
@@ -142,6 +162,13 @@ export default function PlayLobbyClient({ userId, allUsers }: PlayLobbyClientPro
 
   return (
     <div className="flex flex-col gap-6">
+      {connected === false && (
+        <div className="rounded-lg border border-kca-warning/40 bg-kca-warning/10 px-4 py-3 text-sm text-kca-warning">
+          <span className="font-semibold">Disconnected.</span> Reconnecting — until this clears you
+          will not see other players and cannot be paired. If it persists, reload the page.
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-kca-border pb-5">
         <div>

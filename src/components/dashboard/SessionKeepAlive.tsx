@@ -18,18 +18,49 @@ import { useEffect } from "react";
  */
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
+/**
+ * The interval alone is not enough. Browsers throttle timers hard in background
+ * tabs and stop them entirely while the machine sleeps, so the very situations
+ * that outlast a 15-minute token are the ones where this never fires. A laptop
+ * closed for twenty minutes wakes with an expired cookie, the socket
+ * re-handshakes with it, and the server drops the connection — which is how two
+ * accounts ended up unable to see each other in the lobby.
+ *
+ * So also refresh when the tab becomes visible again or the network returns,
+ * rate-limited so that flicking between tabs does not hammer the endpoint.
+ */
+const MIN_GAP_MS = 60 * 1000;
+
 export default function SessionKeepAlive() {
   useEffect(() => {
-    // No refresh on mount: the token was just minted or is still valid, and a
-    // burst of refreshes on every navigation would be pointless load.
-    const id = setInterval(() => {
+    let last = Date.now();
+
+    const refresh = () => {
+      last = Date.now();
       void fetch("/api/auth/refresh", { method: "POST" }).catch(() => {
         // Offline or the refresh token has genuinely expired — the next
         // navigation redirects to /login, which is the right answer.
       });
-    }, REFRESH_INTERVAL_MS);
+    };
 
-    return () => clearInterval(id);
+    // No refresh on mount: the token was just minted or is still valid, and a
+    // burst of refreshes on every navigation would be pointless load.
+    const id = setInterval(refresh, REFRESH_INTERVAL_MS);
+
+    const onWake = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - last < MIN_GAP_MS) return;
+      refresh();
+    };
+
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("online", onWake);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("online", onWake);
+    };
   }, []);
 
   return null;
