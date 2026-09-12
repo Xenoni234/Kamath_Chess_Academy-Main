@@ -33,7 +33,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/classes/${id}/room`);
@@ -84,8 +84,16 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
     };
   }, [room, id, load]);
 
+  // Scroll the chat list itself — never the page.
+  //
+  // This was `chatEndRef.current?.scrollIntoView({ behavior: "smooth" })`. scrollIntoView
+  // scrolls EVERY scrollable ancestor, and the dashboard shell makes <main> one
+  // (`md:h-screen md:overflow-y-auto`), so each incoming message smoothly scrolled the
+  // whole class page — video, roster and all — down toward the chat box. Setting
+  // scrollTop on the list cannot reach past the list.
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = chatScrollRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages]);
 
   function send() {
@@ -196,7 +204,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
 
           <div className="card flex min-h-[20rem] flex-col">
             <h2 className="mb-2 text-sm font-semibold text-kca-white">Class chat</h2>
-            <div className="mb-2 flex-1 space-y-2 overflow-y-auto pr-1">
+            <div ref={chatScrollRef} className="mb-2 flex-1 space-y-2 overflow-y-auto pr-1">
               {messages.length === 0 ? (
                 <p className="text-sm text-kca-gray-500">No messages yet — say hello.</p>
               ) : (
@@ -207,7 +215,6 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
                   </div>
                 ))
               )}
-              <div ref={chatEndRef} />
             </div>
             <div className="flex gap-2">
               <input

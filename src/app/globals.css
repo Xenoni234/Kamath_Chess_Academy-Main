@@ -16,7 +16,12 @@
   --kca-cyan-dim: #0099B2;
   --kca-white: #FFFFFF;
   --kca-gray-100: #E0E0E0;
+  /* 300 and 500 fill gaps that ~50 call sites already assumed existed. Until now
+     `text-kca-gray-500` and `text-kca-gray-300` matched no Tailwind colour at all, so
+     those classes emitted nothing and the text silently inherited its parent's colour. */
+  --kca-gray-300: #B4B4B4;
   --kca-gray-400: #888888;
+  --kca-gray-500: #666666;
   --kca-gray-600: #444444;
   --kca-success: #22C55E;
   --kca-warning: #F59E0B;
@@ -35,7 +40,9 @@
   --kca-cyan-dim: #0E7490;
   --kca-white: #0B0D10;      /* primary text (highest contrast) */
   --kca-gray-100: #33383F;   /* secondary text */
+  --kca-gray-300: #474D55;   /* between secondary and muted */
   --kca-gray-400: #5B616B;   /* muted text */
+  --kca-gray-500: #7B818B;   /* between muted and faint */
   --kca-gray-600: #9BA1AB;   /* faint text / placeholders */
   --kca-success: #15A34A;
   --kca-warning: #B45309;

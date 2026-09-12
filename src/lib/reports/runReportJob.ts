@@ -1,9 +1,6 @@
-import fs from "node:fs/promises";
 import { pristineFetch } from "@/lib/pristineFetch";
-import path from "node:path";
 import { launchBrowser } from "@/lib/pdf/launch";
 import { db } from "@/lib/db";
-import { sendEmail } from "@/lib/email";
 import { generateGameReportNarrative, type GameReportStats } from "@/lib/claude";
 import {
   REPORT_BUDGET,
@@ -144,7 +141,8 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
 }
 
 export async function runReportJob(data: ReportJobData): Promise<void> {
-  const { reportId, userId, username, userEmail, lichessId, chesscomId } = data;
+  // `userEmail` is still on the job payload but deliberately unused: reports are not emailed.
+  const { reportId, userId, username, lichessId, chesscomId } = data;
   try {
     await db.gameReport.update({ where: { id: reportId }, data: { status: "processing" } });
 
@@ -188,31 +186,19 @@ export async function runReportJob(data: ReportJobData): Promise<void> {
       await browser.close();
     }
 
-    // NOTE: /tmp is ephemeral and per-instance. The emailed attachment is the
-    // durable copy; the download route serves this file while it survives.
-    const pdfPath = path.join("/tmp", `report-${reportId}.pdf`);
-    await fs.writeFile(pdfPath, pdfBuffer);
-
-    const emailed = await sendEmail({
-      to: userEmail,
-      subject: "Your KCA Game Report is ready",
-      html: "<p>Your game report is attached.</p>",
-      attachments: [{ filename: "report.pdf", content: pdfBuffer }],
-    });
-    // The report row and its PDF stand regardless; only the delivery failed.
-    // `emailSentAt` below now reflects whether it ACTUALLY sent rather than
-    // whether EMAIL_FROM happened to be configured.
-    if (!emailed.sent) {
-      console.warn(`[report] ${reportId} generated but not emailed: ${emailed.error}`);
-    }
-
+    // The PDF is stored on the row, not in /tmp, and it is NOT emailed.
+    //
+    // /tmp is wiped on every redeploy, so the download degraded into "this report's file
+    // has expired — check your email", which put a child's own report behind their inbox.
+    // The report now simply stays in their account, viewable and downloadable, for as long
+    // as the row exists. Nothing is sent unasked.
     await db.gameReport.update({
       where: { id: reportId, userId },
       data: {
         status: "complete",
         gamesAnalyzed,
-        pdfUrl: pdfPath,
-        emailSentAt: emailed.sent ? new Date() : null,
+        // Prisma's Bytes wants a plain Uint8Array, not a Node Buffer.
+        pdf: new Uint8Array(pdfBuffer),
         summary: narrative,
       },
     });

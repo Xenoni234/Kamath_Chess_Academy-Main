@@ -145,6 +145,8 @@ export default function OpeningsPage() {
   };
 
   const totalGames = data ? data.white + data.draws + data.black : 0;
+  // Whether there is anything worth keeping on screen while the next fetch runs.
+  const hasRows = (data?.moves.length ?? 0) > 0;
 
   return (
     <div className="w-full max-w-6xl mx-auto">
@@ -247,7 +249,7 @@ export default function OpeningsPage() {
                     "px-2.5 py-1 rounded-lg text-[11px] capitalize border transition-colors",
                     speeds.includes(option)
                       ? "border-kca-cyan bg-kca-cyan/10 text-kca-cyan"
-                      : "border-kca-border text-kca-gray-400 hover:border-kca-border-hover",
+                      : "border-kca-border text-kca-gray-400 hover:border-kca-border-bright",
                   )}
                 >
                   {option}
@@ -266,7 +268,7 @@ export default function OpeningsPage() {
                     "px-2.5 py-1 rounded-lg text-[11px] font-mono border transition-colors",
                     ratings.includes(option)
                       ? "border-kca-cyan bg-kca-cyan/10 text-kca-cyan"
-                      : "border-kca-border text-kca-gray-400 hover:border-kca-border-hover",
+                      : "border-kca-border text-kca-gray-400 hover:border-kca-border-bright",
                   )}
                 >
                   {option}+
@@ -278,8 +280,11 @@ export default function OpeningsPage() {
           {/* Moves table */}
           <div className="card p-0 bg-kca-surface border border-kca-border rounded-xl overflow-hidden">
             <div className="flex items-baseline justify-between px-4 py-2.5 border-b border-kca-border">
-              <span className="text-[11px] uppercase tracking-wider text-kca-gray-400">
+              <span className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-kca-gray-400">
                 Popular moves
+                {/* The loading signal lives here now. It used to be a row inside the
+                    table, which is what made the page jump — see the tbody below. */}
+                {isLoading && hasRows && <Loader2 className="h-3 w-3 animate-spin text-kca-cyan" />}
               </span>
               {totalGames > 0 && (
                 <span className="text-[11px] font-mono text-kca-gray-400">
@@ -290,7 +295,7 @@ export default function OpeningsPage() {
 
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
-                <thead className="text-[10px] text-kca-gray-400 bg-kca-black/50 uppercase tracking-wider border-b border-kca-border">
+                <thead className="text-[10px] text-kca-gray-400 bg-kca-surface-2 uppercase tracking-wider border-b border-kca-border">
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">Move</th>
                     <th className="px-4 py-2.5 font-semibold text-right">Games</th>
@@ -298,10 +303,22 @@ export default function OpeningsPage() {
                     <th className="px-4 py-2.5 font-semibold w-[40%]">White / Draw / Black</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-kca-border/50">
-                  {isLoading && (
+                {/* Stale-while-revalidate. The loading state used to replace the whole
+                    tbody with a single spinner row: the table collapsed from ~12 rows to
+                    one, <main> shrank, the browser clamped scrollTop, and 250ms later the
+                    rows returned at a different height — which is the "it jumps to the
+                    middle every time" report. Keeping the previous rows on screen while
+                    the next position loads holds the document height steady, so nothing
+                    moves. The spinner moved up into the card header. */}
+                <tbody
+                  className={cn(
+                    "divide-y divide-kca-border/50",
+                    isLoading && hasRows && "opacity-60 transition-opacity",
+                  )}
+                >
+                  {isLoading && !hasRows && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-10 text-center text-kca-gray-500">
+                      <td colSpan={4} className="px-4 py-10 text-center text-kca-gray-400">
                         <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-kca-cyan" />
                         <p className="text-xs">Loading statistics…</p>
                       </td>
@@ -318,14 +335,14 @@ export default function OpeningsPage() {
 
                   {!isLoading && !error && data?.moves.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-10 text-center text-sm text-kca-gray-500">
+                      <td colSpan={4} className="px-4 py-10 text-center text-sm text-kca-gray-400">
                         No games reach this position with the current filters.
                       </td>
                     </tr>
                   )}
 
-                  {!isLoading &&
-                    !error &&
+                  {!error &&
+                    hasRows &&
                     data?.moves.map((move) => {
                       const total = move.white + move.draws + move.black || 1;
                       const white = (move.white / total) * 100;
