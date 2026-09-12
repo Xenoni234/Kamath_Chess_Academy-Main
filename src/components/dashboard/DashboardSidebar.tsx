@@ -19,12 +19,14 @@ import {
   Inbox,
   LogOut,
   Map,
+  Menu,
   Medal,
   Puzzle,
   Swords,
   Trophy,
   UserCog,
   Users,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSocket } from "@/lib/socket/client";
@@ -43,6 +45,10 @@ export default function DashboardSidebar({ username, role }: { username: string;
   const pathname = usePathname();
   const router = useRouter();
   const [onlineCount, setOnlineCount] = useState(0);
+  // Below `md` the sidebar is an off-canvas drawer. It used to be `w-full
+  // min-h-screen` in normal flow, so on a phone every dashboard page opened
+  // with a full screen of navigation and the actual page began below it.
+  const [navOpen, setNavOpen] = useState(false);
 
   // Set up socket listener for online player count
   useEffect(() => {
@@ -56,6 +62,28 @@ export default function DashboardSidebar({ username, role }: { username: string;
       socket.off("presence:online-count");
     };
   }, []);
+
+  // While the drawer is open the page behind it must not scroll — otherwise a
+  // swipe on the drawer scrolls the dashboard underneath and the user loses
+  // their place.
+  useEffect(() => {
+    if (!navOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [navOpen]);
+
+  // Escape closes it, for anyone on a tablet with a keyboard.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -124,13 +152,69 @@ export default function DashboardSidebar({ username, role }: { username: string;
   //
   // Below `md` the layout stacks vertically and this sits in normal flow.
   return (
-    <aside className="flex min-h-screen w-full flex-col border-r border-kca-border bg-kca-surface px-4 py-5 select-none md:h-screen md:min-h-0 md:w-72 md:overflow-hidden">
+    <>
+      {/* Mobile-only top bar. It stays in normal flow (sticky, not fixed) so
+          the page content begins immediately under it rather than behind it.
+          Deliberately NO backdrop-blur: a filtered ancestor becomes the
+          containing block for `position: fixed` descendants, which is exactly
+          what broke the public navbar's overlay. */}
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-kca-border bg-kca-surface px-4 py-3 md:hidden">
+        <button
+          type="button"
+          onClick={() => setNavOpen(true)}
+          aria-label="Open navigation"
+          aria-expanded={navOpen}
+          aria-controls="dashboard-nav"
+          className="rounded-lg border border-kca-border p-2 text-kca-gray-400 hover:border-kca-cyan hover:text-kca-cyan"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <Link href={`/dashboard/${roleLower}`} className="flex min-w-0 items-center gap-2">
+          <Image src="/kca-logo.png" alt="KCA" width={28} height={28} className="h-7 w-7 shrink-0 object-contain" />
+          <span className="truncate font-display text-sm font-bold text-kca-white">Kamath Chess Academy</span>
+        </Link>
+      </header>
+
+      {/* Dismiss layer. Rendered only when open so it never eats taps. */}
+      {navOpen && (
+        <div
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+          className="fixed inset-0 z-40 bg-kca-black/70 md:hidden"
+        />
+      )}
+
+      <aside
+        id="dashboard-nav"
+        className={cn(
+          // Mobile: an off-canvas drawer, sized to the phone and scrollable on
+          // its own. `h-dvh` rather than `h-screen` so the iOS browser chrome
+          // does not push the logout button below the fold.
+          "fixed inset-y-0 left-0 z-50 flex h-dvh w-[17rem] max-w-[85vw] flex-col overflow-y-auto",
+          "border-r border-kca-border bg-kca-surface px-4 py-5 select-none",
+          "transition-transform duration-200 ease-out",
+          navOpen ? "translate-x-0" : "-translate-x-full",
+          // From `md` up it is the static app-shell column it always was.
+          "md:static md:z-auto md:h-screen md:w-72 md:max-w-none md:translate-x-0 md:overflow-hidden md:transition-none",
+        )}
+      >
+        {/* Only reachable on mobile; the drawer has no other close affordance
+            for someone who does not want to navigate anywhere. */}
+        <button
+          type="button"
+          onClick={() => setNavOpen(false)}
+          aria-label="Close navigation"
+          className="mb-3 self-end rounded-lg border border-kca-border p-2 text-kca-gray-400 hover:border-kca-cyan hover:text-kca-cyan md:hidden"
+        >
+          <X className="h-5 w-5" />
+        </button>
       {/* Home for a signed-in person is their own dashboard, not the marketing
           site. Clicking the logo used to drop them onto the public homepage,
           which reads as having been signed out. The public navbar's logo still
           points at "/" — that is home when you are not signed in. */}
       <Link
         href={`/dashboard/${roleLower}`}
+        onClick={() => setNavOpen(false)}
         className="mb-8 flex items-center gap-3 rounded-xl border border-kca-border bg-kca-black p-3"
       >
         <Image src="/kca-logo.png" alt="KCA" width={44} height={44} className="h-11 w-11 object-contain" />
@@ -163,6 +247,7 @@ export default function DashboardSidebar({ username, role }: { username: string;
             <div key={`${item.label}-${item.href}`} className="flex flex-col">
               <Link
                 href={item.href}
+                onClick={() => setNavOpen(false)}
                 className={cn(
                   "flex items-center gap-3 rounded-lg border-l-2 border-transparent px-4 py-3 text-sm font-semibold text-kca-gray-400 transition-all hover:bg-kca-surface-2 hover:text-kca-white",
                   active && "border-kca-cyan bg-kca-surface-2 text-kca-white"
@@ -185,12 +270,13 @@ export default function DashboardSidebar({ username, role }: { username: string;
       </nav>
 
       <div className="mt-auto space-y-2 pt-4">
-        <ThemeToggle />
-        <button type="button" onClick={logout} className="btn-secondary w-full">
-          <LogOut className="h-5 w-5" />
-          Logout
-        </button>
-      </div>
-    </aside>
+          <ThemeToggle />
+          <button type="button" onClick={logout} className="btn-secondary w-full">
+            <LogOut className="h-5 w-5" />
+            Logout
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }
