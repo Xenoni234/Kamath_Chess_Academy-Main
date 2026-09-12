@@ -311,9 +311,19 @@ export default function OpeningDetailPage({ params }: { params: Promise<{ id: st
               {rep.saved ? "★ Saved" : "☆ Save"}
             </button>
             {rep.hasPdf && (
-              <a className="btn-secondary py-2 text-sm" href={`/api/opening/${id}/download`}>
-                Download PDF
-              </a>
+              <>
+                <a
+                  className="btn-secondary py-2 text-sm"
+                  href={`/api/opening/${id}/download?view=1`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View PDF
+                </a>
+                <a className="btn-secondary py-2 text-sm" href={`/api/opening/${id}/download`}>
+                  Download PDF
+                </a>
+              </>
             )}
             <button type="button" className="btn-secondary py-2 text-sm" disabled={busy} onClick={regenerate}>
               Regenerate

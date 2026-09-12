@@ -109,7 +109,8 @@ Sub-features and status (see "Current state" for detail):
 - ✅ Analysis board (multi-threaded Stockfish 18 + streaming Claude explanations)
 - ✅ Play vs engine at adjustable difficulty
 - ✅ Opening preparation via the Lichess Explorer API
-- ✅ Game reports (fetch games → engine analysis → Claude narrative → PDF → email)
+- ✅ Game reports (fetch games → engine analysis → Claude narrative → PDF, kept
+  in the student's account — **not emailed**, see below)
 
 ### Phase 3 — Academy operations ✅ COMPLETE
 Arena / Swiss / Round Robin tournaments with live standings, class scheduling
@@ -300,9 +301,34 @@ Phase 2 is feature-complete. **Done and verified this phase:**
 - **Game reports** — `/dashboard/reports` is wired to the real API and polls
   for status. `src/lib/reports/gameStats.ts` replaced the old
   `Math.random()` accuracy with genuine Stockfish analysis of the player's own
-  moves (depth 12, first 8 plies skipped as book, capped at 20 games / 1500
-  positions). Verified against real Lichess data: Magnus scores 92.9%, his
-  opponents 90.7% with a 3.1% blunder rate.
+  moves (depth 12, first 8 plies skipped as book, capped at **60 games / 2400
+  positions**, fetching 120). Verified against real Lichess data: Magnus scores
+  92.9%, his opponents 90.7% with a 3.1% blunder rate.
+  **The cap was 20 games and that was too few to say anything** — a student with
+  70 games in four days got a report over 19 of them whose "most played openings"
+  table read "1 game" on every row, and a 0% win rate over one game is noise
+  printed as a finding. `analyzePositions` is deliberately **serial on a single
+  engine** (unlike the dossier scan it does not fan out over `ENGINE_CONCURRENCY`),
+  and depth 12 measures at **23 ms per position** on an M4 — so on the 2-vCPU VPS
+  60 games is roughly 4-6 minutes, against a 15-minute engine budget. Raising
+  `maxGames` again means re-measuring on the VPS first; do not guess it up. Note
+  `FETCH_LIMIT` in `runReportJob.ts` is a second cap — raising `maxGames` past it
+  does nothing.
+  **The report also runs a deep self-profile** (`src/lib/reports/selfProfile.ts`):
+  the same `scanGames` / `profileTactics` / `profileBehaviour` / `profileEvolution`
+  / `detectWeaknesses` stages the opponent dossier runs, pointed at the student's
+  own games, over **both colours** — weaknesses as White and as Black are different
+  skills and reporting one while calling it "your play" is a lie of omission. The
+  scan budget is split across the two colours so profiling both costs about what
+  profiling one opponent costs. **It never computes a headline figure**:
+  `ScanResult.moves` drops moves that never got their depth-18 confirmation, and
+  those are exactly the moves that differed from the engine's choice, so an average
+  over what survives is biased upward. The report's own unbiased pass owns every
+  published number; the profile only adds the qualitative sections, and every stage
+  degrades to undefined rather than throwing. Two engine passes means ~8-12 minutes
+  on the VPS — the reports page quotes that and the bell fires when it lands.
+  Unifying the two passes would save real time but reintroduces that bias; it is a
+  follow-up, not a tidy-up.
 
 **Known gaps / follow-ups:**
 
@@ -418,9 +444,21 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   small enough to fit is much weaker prose, and it competes with Stockfish for
   the same cores. Measured: gemma2:2b took ~3.6 s for ~110 words, versus well
   under a second on a hosted 120B model.
-- Report PDFs are written to `/tmp` and served by
-  `/api/reports/[reportId]/download`; that path is ephemeral and per-instance,
-  so the emailed attachment is the durable copy.
+- **Generated PDFs live on their database row, not in `/tmp`. Do not move them
+  back.** `/tmp` is wiped on every redeploy, so all four download routes
+  eventually answered "this file has expired" — and because every one of them is
+  reached by a plain `<a href>`, that answer arrived as **raw JSON in a browser
+  tab, to a child**. `GameReport.pdf`, `RepertoirePlan.pdf`, `OpeningRepertoire.pdf`
+  and `Invoice.pdf` are all `Bytes?` columns now; `/tmp` remains only as a
+  same-instance convenience, and a write failure there must not discard the PDF.
+  Every download route serves from the row, falls back to the legacy `pdfUrl` for
+  older records, and renders `src/lib/http/errorPage.ts` — never JSON — on failure.
+  `?view=1` opens inline, anything else downloads.
+- **Reports and dossiers are NOT emailed.** They stay in the student's account to
+  view, download and delete. The email used to be the only completion signal, so
+  removing it left nothing telling anyone their report was ready — both jobs now
+  ring the notification bell on success *and* on failure. OTP, invoices and the
+  contact form are the only things that still send mail.
 - Report and profiling jobs are durable **only when `QUEUE_REDIS_URL` is set**
   (BullMQ + `npm run worker`). Without it they fall back to inline
   `setImmediate`, and a restart mid-job leaves the row stuck in `processing`.
@@ -429,8 +467,27 @@ Phase 2 is feature-complete. **Done and verified this phase:**
   Never remove that — without it, every `fetch` made *after* engine analysis in
   the same process (opening explorer, Upstash Redis, Anthropic, Resend) fails
   with `fetch is not a function`.
-- Dossier PDFs are written to `/tmp` (same ephemerality caveat as reports);
-  regenerating the dossier is the recovery path.
+- **The AI narratives are markdown and the PDFs must render it.**
+  `src/lib/markdown/toHtml.ts` is the one renderer for all three generated PDFs;
+  it mirrors the grammar of `src/components/common/Markdown.tsx`, which is what
+  the dashboard uses on screen. Before it existed the PDFs escaped the markdown
+  and wrapped each line in `<p>`, so a real report opened with a literal
+  `**Overall Assessment**` and bullets written as `- **Opening repertoire:**`
+  while the same text rendered correctly in the browser. Escaping happens
+  **before** formatting so model output can never inject a tag — do not reorder
+  those two steps. `scripts/verifyMarkdownHtml.ts` pins it.
+- **A truncated AI answer must never be returned as if it were complete.**
+  `llmChat`, `ollamaChat` and `textFromMessage` all report `truncated`
+  (`finish_reason: "length"` / `done_reason: "length"` / `stop_reason:
+  "max_tokens"`); none of them did, so a coach's guide reached a student ending
+  mid-sentence with raw `|` pipes underneath it where a markdown table row had
+  been cut in half. `endCleanly` trims what survives, and it is deliberately
+  conservative — two earlier versions threw away finished text (one deleted the
+  whole table instead of the half-row, the other erased the entire answer when
+  the model wrote one long paragraph with no newline, which is the report's
+  normal shape). `scripts/verifyEndCleanly.ts` pins both. Output budgets live in
+  `LONG_FORM_TOKENS` / `REPORT_TOKENS`; `endCleanly` handles a cut, it cannot put
+  back what was never written.
 - Phase 4 novelty mining is only as good as the explorer data: without
   `LICHESS_API_TOKEN` it returns no novelties rather than guessing. A strong
   opponent's mainlines legitimately yield zero novelties — that is a real
@@ -659,6 +716,12 @@ npx tsx --env-file=.env.local scripts/e2eProfileJob.ts         # the real job in
 npx tsx scripts/verifyOtb.ts <fideId> <broadcast.pgn>          # OTB identity + increment inference, offline against a PGN
 npx tsx --env-file=.env.local scripts/verifyOtb.ts <fideId>    # OTB full live chain against Lichess broadcasts
 npx tsx scripts/verifyEvolution.ts                             # style-evolution trend gating (synthetic, no engine/network)
+
+# Offline, no DB and no network — every one of these pins a bug a real user hit.
+npx tsx scripts/verifyGameState.ts     # a finished game renders as PLAYED, not spectated
+npx tsx scripts/verifyEndCleanly.ts    # a truncated AI answer ends tidily and loses nothing finished
+npx tsx scripts/verifyMarkdownHtml.ts  # the PDFs render markdown instead of printing ** and -
+npx tsx scripts/verifySelfProfile.ts   # the report's self-profile never states a rate without its sample size
 # (The dev-only /api/dev/otb diagnostic route was removed before launch — use
 #  scripts/verifyOtb.ts, which covers the same chain offline and live.)
 npm run setup:engine # copy Stockfish builds into public/engine (auto on pre{dev,build})

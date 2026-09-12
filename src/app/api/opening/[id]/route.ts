@@ -37,10 +37,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
   }
 
-  const saved = await db.savedOpening.findUnique({
-    where: { userId_repertoireId: { userId: payload.userId, repertoireId: id } },
-    select: { id: true },
-  });
+  // `hasPdf` has to come from the stored bytes, not from `pdfUrl`: /tmp is wiped on every
+  // redeploy while the path column survives, so the old check kept offering a download
+  // button for a file that was no longer there. A COUNT answers it without pulling the
+  // blob across the wire, which selecting `pdf` would.
+  const [saved, withPdf] = await Promise.all([
+    db.savedOpening.findUnique({
+      where: { userId_repertoireId: { userId: payload.userId, repertoireId: id } },
+      select: { id: true },
+    }),
+    db.openingRepertoire.count({ where: { id, pdf: { not: null } } }),
+  ]);
 
   const { pdfUrl, ...rest } = repertoire;
   return NextResponse.json({
@@ -49,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       ...rest,
       guide: repertoire.summary,
       lines: repertoire.linesJson,
-      hasPdf: Boolean(pdfUrl),
+      hasPdf: withPdf > 0 || Boolean(pdfUrl),
       saved: Boolean(saved),
     },
   });
