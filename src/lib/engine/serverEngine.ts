@@ -376,6 +376,12 @@ export async function mapWithEngines<T, R>(
 
   const results: (R | null)[] = new Array(items.length).fill(null);
   let cursor = 0;
+  // Counted so a truncated batch is visible. The two sibling functions below
+  // both log `budget exhausted after N/M`; this one — the pool that runs the
+  // whole-game scan, by far the most expensive stage — used to break on the
+  // deadline and say nothing. A dossier built from half the positions it asked
+  // for then looks exactly like one built from all of them.
+  let attempted = 0;
 
   const runOne = async () => {
     let engine: EngineHandle | null = null;
@@ -388,6 +394,7 @@ export async function mapWithEngines<T, R>(
       // the same index.
       for (let index = cursor++; index < items.length; index = cursor++) {
         if (Date.now() > deadline) break;
+        attempted++;
         try {
           results[index] = await worker(items[index], async (fen, depth) => {
             const remaining = deadline - Date.now();
@@ -414,6 +421,15 @@ export async function mapWithEngines<T, R>(
   };
 
   await Promise.all(Array.from({ length: concurrency }, runOne));
+
+  if (attempted < items.length) {
+    console.warn(
+      `[serverEngine] budget exhausted after ${attempted}/${items.length} items ` +
+        `(concurrency ${concurrency}, budget ${Math.round(totalTimeoutMs / 1000)}s) — ` +
+        `the remainder were skipped, not failed`,
+    );
+  }
+
   return results;
 }
 
