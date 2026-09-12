@@ -320,6 +320,13 @@ model GameReport {
   lichessId     String?
   chesscomId    String?
   status        String   @default("pending")
+  /// The finished PDF itself. Reports used to live only in /tmp, which is wiped on every
+  /// redeploy, so the download said "this report's file has expired — check your email".
+  /// Students should not have to dig through email for their own report, so the bytes are
+  /// kept here and the download always works. A report PDF is ~150-300 KB.
+  pdf           Bytes?
+  /// Legacy /tmp path. Kept so reports generated before `pdf` existed still resolve if the
+  /// file happens to survive; new reports do not set it.
   pdfUrl        String?
   emailSentAt   DateTime?
   gamesAnalyzed Int      @default(0)

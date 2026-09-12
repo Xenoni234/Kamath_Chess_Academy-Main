@@ -26,8 +26,31 @@ export default function AnalysisMoveList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
 
+  // Keep the current move visible WITHOUT scrolling anything but this list.
+  //
+  // This was `activeRef.current?.scrollIntoView({ block: "nearest" })`, and "nearest" is
+  // misleading: scrollIntoView walks every scrollable ancestor and scrolls each one until
+  // the element is visible in all of them. The dashboard shell makes <main> a scroll
+  // container (`md:h-screen md:overflow-y-auto`), and this list sits low in the right-hand
+  // column — so every move dragged the whole page down and the board out of view. That is
+  // the "screen moves down while analysing" report.
+  //
+  // Rect deltas rather than offsetTop, because offsetTop is measured from the nearest
+  // POSITIONED ancestor, which this container is not. Touching only `scrollTop` makes it
+  // impossible for this to escape the list again.
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest" });
+    const container = scrollRef.current;
+    const active = activeRef.current;
+    if (!container || !active) return;
+
+    const view = container.getBoundingClientRect();
+    const move = active.getBoundingClientRect();
+
+    if (move.top < view.top) {
+      container.scrollTop -= view.top - move.top;
+    } else if (move.bottom > view.bottom) {
+      container.scrollTop += move.bottom - view.bottom;
+    }
   }, [currentPly]);
 
   // Pair half-moves into numbered rows. A line starting from a Black-to-move

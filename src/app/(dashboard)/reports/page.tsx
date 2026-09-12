@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Download, FileText, Loader2, Plus, X } from "lucide-react";
+import { AlertCircle, Download, Eye, FileText, Loader2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ReportStatus = "pending" | "processing" | "complete" | "failed";
@@ -165,8 +165,8 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-3xl font-display font-bold text-kca-white mb-2">Game Reports</h1>
           <p className="text-sm text-kca-gray-400">
-            Stockfish analyses your recent online games and your AI coach writes up what to work
-            on. The finished PDF is emailed to you.
+            We look at your recent online games and write down what to practise. Your report
+            stays here — open it or save it whenever you like.
           </p>
         </div>
         <button
@@ -191,7 +191,7 @@ export default function ReportsPage() {
                 <th className="px-6 py-4 font-semibold">Account</th>
                 <th className="px-6 py-4 font-semibold">Games</th>
                 <th className="px-6 py-4 font-semibold">Status</th>
-                <th className="px-6 py-4 font-semibold text-right">PDF</th>
+                <th className="px-6 py-4 font-semibold text-right">Report</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-kca-border/50">
@@ -237,13 +237,25 @@ export default function ReportsPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     {report.status === "complete" ? (
-                      <a
-                        href={`/api/reports/${report.id}/download`}
-                        className="inline-flex items-center gap-1.5 text-xs text-kca-cyan hover:underline"
-                      >
-                        <Download className="w-4 h-4" />
-                        Download
-                      </a>
+                      <div className="inline-flex items-center gap-4">
+                        {/* Opening it should not require saving a file first. */}
+                        <a
+                          href={`/api/reports/${report.id}/download?view=1`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs text-kca-cyan hover:underline"
+                        >
+                          <Eye className="w-4 h-4" />
+                          Open
+                        </a>
+                        <a
+                          href={`/api/reports/${report.id}/download`}
+                          className="inline-flex items-center gap-1.5 text-xs text-kca-cyan hover:underline"
+                        >
+                          <Download className="w-4 h-4" />
+                          Save
+                        </a>
+                      </div>
                     ) : (
                       <span className="text-kca-gray-600">—</span>
                     )}

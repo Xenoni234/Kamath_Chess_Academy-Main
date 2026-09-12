@@ -268,7 +268,7 @@ export default function PlayEnginePage() {
                     "py-2.5 rounded-lg text-sm capitalize border transition-colors",
                     colourChoice === option
                       ? "border-kca-cyan bg-kca-cyan/10 text-kca-cyan"
-                      : "border-kca-border text-kca-gray-100 hover:border-kca-border-hover",
+                      : "border-kca-border text-kca-gray-100 hover:border-kca-border-bright",
                   )}
                 >
                   {option}
@@ -298,7 +298,7 @@ export default function PlayEnginePage() {
                     "py-2 rounded-lg text-sm font-mono border transition-colors",
                     entry.id === levelId
                       ? "border-kca-cyan bg-kca-cyan/10 text-kca-cyan"
-                      : "border-kca-border text-kca-gray-400 hover:border-kca-border-hover",
+                      : "border-kca-border text-kca-gray-400 hover:border-kca-border-bright",
                   )}
                 >
                   {entry.id}
