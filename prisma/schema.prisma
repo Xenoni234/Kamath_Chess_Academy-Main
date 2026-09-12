@@ -527,6 +527,10 @@ model Invoice {
   id        String   @id @default(cuid())
   paymentId String   @unique
   number    String   @unique
+  /// The invoice PDF itself. Same reason as GameReport.pdf: /tmp is wiped on every
+  /// redeploy, and a financial record must not depend on a file that disappears.
+  pdf       Bytes?
+  /// Legacy /tmp path, kept so invoices issued before `pdf` existed still resolve.
   pdfUrl    String?
   issuedAt  DateTime @default(now())
   payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
@@ -691,6 +695,11 @@ model OpeningRepertoire {
   artifact    Json?
   summary     String?  @db.Text
   linesJson   Json?
+  /// The guide PDF itself. Same reason as GameReport.pdf and RepertoirePlan.pdf: /tmp is
+  /// wiped on every redeploy, so the download degraded to "this repertoire's file has
+  /// expired" — served as raw JSON, in a browser tab, to a child.
+  pdf         Bytes?
+  /// Legacy /tmp path, kept so rows written before `pdf` existed still resolve.
   pdfUrl      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
