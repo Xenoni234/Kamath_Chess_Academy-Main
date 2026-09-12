@@ -77,6 +77,94 @@ export function createGame(params: {
   };
 }
 
+/**
+ * The persisted columns this normaliser reads. Structural on purpose, so a caller's
+ * `include` shape is irrelevant — only that it selected these.
+ */
+export type PersistedGameRow = {
+  id: string;
+  whiteUserId: string | null;
+  blackUserId: string | null;
+  pgn: string;
+  fen: string | null;
+  moves: string[];
+  timeControl: string | null;
+  timeFormat: keyof typeof TimeFormat;
+  result: GameResult;
+  termination: string | null;
+  rated: boolean;
+  whiteTimeMs: number | null;
+  blackTimeMs: number | null;
+  incrementMs: number | null;
+  lastMoveAt: Date | null;
+  tournamentId: string | null;
+  createdAt: Date;
+};
+
+/**
+ * Turn a finished game's database row into the `GameState` the room renders from.
+ *
+ * The two shapes are NOT interchangeable and never were: the row calls the players
+ * `whiteUserId`/`blackUserId`, has no `status` or `turn` at all, and stores `result` as
+ * the `GameResult` enum rather than the client's `"white" | "black" | "draw"`. The game
+ * page used to bridge that with `dbGame as unknown as GameState`, and the double cast
+ * silenced every mismatch: `game.white` arrived `undefined`, so `isPlayer` was false and
+ * BOTH real players were shown "Spectating", Black got a white-oriented board, and the
+ * result modal never rendered because `status` was undefined too.
+ *
+ * It could not self-heal either — a false `isPlayer` makes the client emit
+ * `game:spectate`, the server finds nothing in Redis (which is exactly why the page fell
+ * back to Postgres) and answers `game:error`, which had no listener.
+ *
+ * Redis drops a game five minutes after it ends, so this was every game reopened from the
+ * history list, not an edge case. Map the row explicitly, and let the compiler hold the
+ * two shapes together from here on.
+ */
+export function gameStateFromDbRow(row: PersistedGameRow): GameState {
+  // A deleted user leaves a null id (the relation is SetNull). Empty string is right:
+  // it is a string, and it can never equal a real user id, so nobody is mistaken for them.
+  const white = row.whiteUserId ?? "";
+  const black = row.blackUserId ?? "";
+
+  const fen = (() => {
+    if (row.fen) return row.fen;
+    // Older rows can lack a FEN. Replay the PGN rather than showing the start position.
+    try {
+      const chess = new Chess();
+      chess.loadPgn(row.pgn);
+      return chess.fen();
+    } catch {
+      return new Chess().fen();
+    }
+  })();
+
+  const sideToMove = fen.split(" ")[1];
+
+  return {
+    gameId: row.id,
+    white,
+    black,
+    fen,
+    pgn: row.pgn,
+    moves: row.moves,
+    // A persisted row is by definition no longer in play.
+    status: row.result === "ABORT" ? "aborted" : "finished",
+    result:
+      row.result === "WHITE_WIN" ? "white" : row.result === "BLACK_WIN" ? "black" : row.result === "DRAW" ? "draw" : undefined,
+    termination: row.termination ?? undefined,
+    whiteTimeMs: row.whiteTimeMs ?? 0,
+    blackTimeMs: row.blackTimeMs ?? 0,
+    incrementMs: row.incrementMs ?? 0,
+    lastMoveAt: (row.lastMoveAt ?? row.createdAt).getTime(),
+    turn: sideToMove === "b" ? "b" : "w",
+    rated: row.rated,
+    format: row.timeFormat,
+    timeControl: row.timeControl ?? "",
+    tournamentId: row.tournamentId ?? undefined,
+    createdAt: row.createdAt.getTime(),
+  };
+}
+
 export async function saveGameToRedis(gameState: GameState): Promise<void> {
   await redis.set(gameKey(gameState.gameId), JSON.stringify(gameState), { ex: 86_400 });
 }

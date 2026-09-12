@@ -2,8 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyAccessToken } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { type GameState } from "@/lib/socket/gameEngine";
-import { getGameFromRedis } from "@/lib/socket/gameEngine";
+import { gameStateFromDbRow, getGameFromRedis } from "@/lib/socket/gameEngine";
 import GameRoomClient from "./GameRoomClient";
 
 export default async function GameRoomPage(context: { params: Promise<{ gameId: string }> }) {
@@ -83,6 +82,11 @@ export default async function GameRoomPage(context: { params: Promise<{ gameId: 
   const initialBlackUsername = blackUser?.username ?? "Black Player";
   const initialBlackRating = blackUser?.ratings[0]?.rating ?? 1500;
 
+  // Normalised, never cast. `dbGame as unknown as GameState` used to hide that the row
+  // calls the players whiteUserId/blackUserId and carries no status or turn, so both real
+  // players were shown "Spectating" on every game reopened from the history list.
+  const persistedGame = dbGame ? gameStateFromDbRow(dbGame) : null;
+
   return (
     <GameRoomClient
       gameId={gameId}
@@ -90,7 +94,7 @@ export default async function GameRoomPage(context: { params: Promise<{ gameId: 
       username={username}
       role={role}
       activeGame={activeGame}
-      dbGame={dbGame as unknown as GameState}
+      dbGame={persistedGame}
       isFinished={isFinished}
       initialPlayers={{
         white: { username: initialWhiteUsername, rating: initialWhiteRating },
