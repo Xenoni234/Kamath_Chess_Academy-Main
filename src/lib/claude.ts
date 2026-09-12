@@ -264,7 +264,7 @@ Opening accuracy: ${stats.openingAccuracy}%
 Middlegame accuracy: ${stats.middlegameAccuracy}%
 Endgame accuracy: ${stats.endgameAccuracy}%
 Openings they play most (grouped by family; "winRate" is a SCORE out of 100 where a draw counts a half. A null winRate means we deliberately withheld it because fewer than ${MIN_OPENING_GAMES} games is not enough to state a rate — say "not enough games yet" and NEVER estimate or infer a percentage for those): ${JSON.stringify(stats.topOpenings)}
-Openings where they score lowest on accuracy (only families with at least ${MIN_OPENING_GAMES} games appear here at all): ${JSON.stringify(stats.weakestOpenings)}
+Openings where they score lowest on accuracy (only families with at least ${MIN_OPENING_GAMES} games appear here at all; an EMPTY list means no single opening has been played enough times yet — say exactly that and do not fall back to naming one anyway): ${JSON.stringify(stats.weakestOpenings)}
 Recurring problems behind their blunders: ${stats.tacticalPatternsMissed.join(", ") || "none clearly identified — say so rather than guessing"}${profileBlock}`;
 }
 

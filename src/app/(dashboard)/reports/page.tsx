@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Download, Eye, FileText, Loader2, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type ReportStatus = "pending" | "processing" | "complete" | "failed";
 
@@ -84,17 +85,10 @@ export default function ReportsPage() {
 
   const loadReports = useCallback(async () => {
     try {
-      let response = await fetch("/api/reports");
-
-      // A 401 here is almost never a real sign-out. This page polls for up to 25 minutes
-      // while a report builds, and the access token lives 15, so a long build WILL cross
-      // an expiry — which surfaced as a red "Unauthorized" sitting over a report that was
-      // building perfectly well. Refresh once and retry before believing it.
-      if (response.status === 401) {
-        const refreshed = await fetch("/api/auth/refresh", { method: "POST" });
-        if (refreshed.ok) response = await fetch("/api/reports");
-      }
-
+      // `fetchWithAuth`, not `fetch`: this page polls for up to 40 minutes while a report
+      // builds and the access token lives 15, so a long build WILL cross an expiry. That
+      // surfaced as a red "Unauthorized" sitting over a report that was building fine.
+      const response = await fetchWithAuth("/api/reports");
       const data = await response.json();
       if (!response.ok || !data.success) {
         setListError(data.message ?? "Could not load your reports.");
@@ -185,7 +179,7 @@ export default function ReportsPage() {
     setFormError(null);
 
     try {
-      const response = await fetch("/api/reports/generate", {
+      const response = await fetchWithAuth("/api/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -224,7 +218,7 @@ export default function ReportsPage() {
     setReports((rows) => rows.filter((r) => r.id !== id));
 
     try {
-      const res = await fetch(`/api/reports/${id}`, { method: "DELETE" });
+      const res = await fetchWithAuth(`/api/reports/${id}`, { method: "DELETE" });
       if (!res.ok) setReports(previous);
     } catch {
       setReports(previous);

@@ -7,6 +7,7 @@ import { CheckCircle2, XCircle, Loader2, ArrowRight, Puzzle as PuzzleIcon, Targe
 import { cn } from "@/lib/utils";
 import { sanForUci } from "@/lib/engine/analysis";
 import ChessBoard from "@/components/chess/ChessBoard";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type PuzzleData = {
   id: string;
@@ -125,7 +126,7 @@ export default function PuzzlesPage() {
 
     const timeTakenMs = Math.max(1, Date.now() - startRef.current);
     try {
-      await fetch(`/api/puzzles/${current.id}/attempt`, {
+      await fetchWithAuth(`/api/puzzles/${current.id}/attempt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ solved, timeTakenMs }),
@@ -155,7 +156,7 @@ export default function PuzzlesPage() {
       let p: PuzzleData | null = null;
       let solution: string[] = [];
       for (let attempt = 0; attempt < MAX_PUZZLE_ATTEMPTS; attempt += 1) {
-        const res = await fetch(`/api/puzzles?${params.toString()}`);
+        const res = await fetchWithAuth(`/api/puzzles?${params.toString()}`);
         const data = await res.json();
         if (!res.ok || !data.success || !data.puzzles?.length) {
           setErrorMsg(data.message ?? "No puzzles available.");
@@ -230,7 +231,7 @@ export default function PuzzlesPage() {
 
   // Load the user's all-time solved count once.
   useEffect(() => {
-    fetch("/api/puzzles/stats")
+    fetchWithAuth("/api/puzzles/stats")
       .then((r) => r.json())
       .then((d) => {
         if (d?.success) setSolvedCount(d.solved);

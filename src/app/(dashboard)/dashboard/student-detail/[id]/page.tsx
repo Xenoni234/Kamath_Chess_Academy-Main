@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Overview = {
   student: { id: string; username: string; email: string; createdAt: string };
@@ -61,7 +62,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/students/${id}/overview`);
+        const res = await fetchWithAuth(`/api/students/${id}/overview`);
         const json = await res.json();
         if (!res.ok || !json.success) {
           setError(json.message ?? "Not found");

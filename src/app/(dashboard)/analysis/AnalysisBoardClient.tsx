@@ -35,6 +35,7 @@ import {
 import { CLASSIFICATION_META, type MoveClassification } from "@/lib/engine/classify";
 import { scoreFromLine } from "@/lib/engine/uci";
 import { cn } from "@/lib/utils";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 /** Depth used for the sequential full-game sweep. */
 const SCAN_DEPTH = 14;
@@ -116,7 +117,7 @@ export default function AnalysisBoardClient() {
     const load = async () => {
       setIsLoadingGame(true);
       try {
-        const response = await fetch(`/api/games/${gameId}`);
+        const response = await fetchWithAuth(`/api/games/${gameId}`);
         const data = await response.json();
         if (!active) return;
 

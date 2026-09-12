@@ -5,6 +5,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import type { z } from "zod";
 import type { explainMoveSchema } from "@/lib/validations/phase2";
 import Markdown from "@/components/common/Markdown";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 // Derived from the Zod schema rather than imported from @/lib/claude, which
 // would pull the Anthropic SDK into the browser bundle.
@@ -73,7 +74,7 @@ export default function ExplainPanel({
       // full-strength search for the same cores.
       onStreamingChange?.(true);
 
-      const response = await fetch("/api/analysis/explain", {
+      const response = await fetchWithAuth("/api/analysis/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),

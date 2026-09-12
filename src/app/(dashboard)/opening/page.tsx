@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Candidate = { name: string; eco: string; moves?: string[] };
 type RepertoireRow = { id: string; name: string; eco: string | null; colorToPlay: string; status: string };
@@ -21,7 +22,7 @@ export default function OpeningTrainerPage() {
 
   const loadLists = useCallback(async () => {
     try {
-      const res = await fetch("/api/opening");
+      const res = await fetchWithAuth("/api/opening");
       const data = await res.json();
       if (data.success) {
         setRecent(data.repertoires ?? []);
@@ -50,7 +51,7 @@ export default function OpeningTrainerPage() {
     }
     debounce.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/opening/resolve?q=${encodeURIComponent(query.trim())}`);
+        const res = await fetchWithAuth(`/api/opening/resolve?q=${encodeURIComponent(query.trim())}`);
         const data = await res.json();
         if (data.success) {
           setCandidates(data.candidates ?? []);
@@ -71,7 +72,7 @@ export default function OpeningTrainerPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/opening", {
+      const res = await fetchWithAuth("/api/opening", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ opening: name, colorToPlay: color }),

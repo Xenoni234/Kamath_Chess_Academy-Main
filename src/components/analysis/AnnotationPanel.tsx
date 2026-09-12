@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 export type Annotation = {
   id: string;
@@ -60,7 +61,7 @@ export default function AnnotationPanel({
   const load = useCallback(async () => {
     if (!gameId) return;
     try {
-      const res = await fetch(`/api/games/${gameId}/annotations`);
+      const res = await fetchWithAuth(`/api/games/${gameId}/annotations`);
       const data = await res.json();
       if (!res.ok || !data.success) return;
       setAnnotations(data.annotations ?? []);
@@ -100,7 +101,7 @@ export default function AnnotationPanel({
     setSaving(true);
     setStatus(null);
     try {
-      const res = await fetch(`/api/games/${gameId}/annotations`, {
+      const res = await fetchWithAuth(`/api/games/${gameId}/annotations`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ply, body: draft }),

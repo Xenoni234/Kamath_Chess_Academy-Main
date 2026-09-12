@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Parent = { username: string; email: string; linkedAt: string };
 
@@ -28,7 +29,7 @@ export default function ParentCodeCard() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/user/parent-code");
+      const res = await fetchWithAuth("/api/user/parent-code");
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? null);
@@ -55,7 +56,7 @@ export default function ParentCodeCard() {
     setBusy(true);
     setCopied(false);
     try {
-      const res = await fetch("/api/user/parent-code", { method: "POST" });
+      const res = await fetchWithAuth("/api/user/parent-code", { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.success) {
         setError(data.message ?? "Could not create a new code.");

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Trophy, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHasRole } from "@/components/auth/RoleContext";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Tournament = {
   id: string;
@@ -33,13 +34,13 @@ export default function TournamentsPage() {
   const [startsAt, setStartsAt] = useState("");
 
   async function reload() {
-    const res = await fetch("/api/tournaments");
+    const res = await fetchWithAuth("/api/tournaments");
     const data = await res.json();
     if (data.success) setTournaments(data.tournaments);
   }
 
   useEffect(() => {
-    fetch("/api/tournaments")
+    fetchWithAuth("/api/tournaments")
       .then((r) => r.json())
       .then((t) => {
         if (t.success) setTournaments(t.tournaments);
@@ -57,7 +58,7 @@ export default function TournamentsPage() {
     if (!title.trim() || !startsAt) return;
     setCreating(true);
     try {
-      const res = await fetch("/api/tournaments", {
+      const res = await fetchWithAuth("/api/tournaments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, type, startsAt }),

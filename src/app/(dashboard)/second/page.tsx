@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { SOURCE_LABEL } from "@/lib/second/types";
 import { MAX_PASTED_GAMES } from "@/lib/validations/phase4";
 import type { OpponentSource } from "@/lib/second/types";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type ProfileStatus = "pending" | "processing" | "complete" | "failed";
 
@@ -123,7 +124,7 @@ export default function SecondPage() {
     setListError(null);
     setDeletingId(profileId);
     try {
-      const response = await fetch(`/api/second/profiles/${profileId}`, { method: "DELETE" });
+      const response = await fetchWithAuth(`/api/second/profiles/${profileId}`, { method: "DELETE" });
       const data = await response.json();
       if (!response.ok || !data.success) {
         setListError(data.message ?? "Could not delete that dossier.");
@@ -142,7 +143,7 @@ export default function SecondPage() {
 
   const loadProfiles = useCallback(async () => {
     try {
-      const response = await fetch("/api/second/profiles");
+      const response = await fetchWithAuth("/api/second/profiles");
       const data = await response.json();
       if (!response.ok || !data.success) {
         setListError(data.message ?? "Could not load your dossiers.");
@@ -216,7 +217,7 @@ export default function SecondPage() {
     previewTimer.current = setTimeout(async () => {
       setPreviewLoading(true);
       try {
-        const res = await fetch("/api/second/pgn-preview", {
+        const res = await fetchWithAuth("/api/second/pgn-preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -283,7 +284,7 @@ export default function SecondPage() {
     setIsSubmitting(true);
     setFormError(null);
     try {
-      const response = await fetch("/api/second/profiles", {
+      const response = await fetchWithAuth("/api/second/profiles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

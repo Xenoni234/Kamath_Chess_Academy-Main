@@ -3,6 +3,7 @@ import { launchBrowser } from "@/lib/pdf/launch";
 import { createNotification } from "@/lib/notify";
 import { markdownToHtml, MARKDOWN_PDF_CSS } from "@/lib/markdown/toHtml";
 import { buildSelfProfile, describeSelfProfile } from "@/lib/reports/selfProfile";
+import { MIN_OPENING_GAMES } from "@/lib/reports/gameStats";
 import { db } from "@/lib/db";
 import { generateGameReportNarrative, type GameReportStats } from "@/lib/claude";
 import {
@@ -135,12 +136,12 @@ function renderReportHtml(stats: GameReportStats, narrative: string) {
   <h2>Most played openings</h2>
   <table>
     <thead><tr><th>Opening</th><th>Games</th><th>Score</th></tr></thead>
-    <tbody>${openingRows || "<tr><td colspan=\"3\">No opening data.</td></tr>"}</tbody>
+    <tbody>${openingRows || '<tr><td colspan="3" class="muted">We could not read the opening names for these games.</td></tr>'}</tbody>
   </table>
   <h2>Lowest accuracy openings</h2>
   <table>
     <thead><tr><th>Opening</th><th>Accuracy</th><th>Games</th></tr></thead>
-    <tbody>${weakRows || "<tr><td colspan=\"2\">No opening data.</td></tr>"}</tbody>
+    <tbody>${weakRows || `<tr><td colspan="3" class="muted">No single opening has been played ${MIN_OPENING_GAMES} times yet — play a few more and this will fill in.</td></tr>`}</tbody>
   </table>
   <p class="footnote">
     Positions evaluated with Stockfish 18 at depth ${REPORT_BUDGET.depth}, skipping the first

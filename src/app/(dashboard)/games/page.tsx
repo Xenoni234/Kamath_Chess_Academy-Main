@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Trophy, ChevronRight, Loader2, Activity } from "lucide-react";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type GameResult = "win" | "loss" | "draw" | "aborted";
 
@@ -31,7 +32,7 @@ export default function GamesPage() {
   useEffect(() => {
     let active = true;
 
-    fetch("/api/games")
+    fetchWithAuth("/api/games")
       .then(async (response) => {
         const data = await response.json();
         if (!active) return;

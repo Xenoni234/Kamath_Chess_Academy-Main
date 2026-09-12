@@ -7,6 +7,7 @@ import { Trophy, ArrowLeft, Loader2, Play, SkipForward, Flag, Check } from "luci
 import { getSocket } from "@/lib/socket/client";
 import { cn } from "@/lib/utils";
 import { useHasRole } from "@/components/auth/RoleContext";
+import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 type Standing = { rank: number; userId?: string; username: string; score: number };
 type Detail = {
@@ -48,7 +49,7 @@ export default function TournamentDetailPage() {
   const isManager = useHasRole("HR", "HEAD");
 
   const load = useCallback(async () => {
-    const detail = await fetch(`/api/tournaments/${id}`).then((r) => r.json());
+    const detail = await fetchWithAuth(`/api/tournaments/${id}`).then((r) => r.json());
     if (detail.success) {
       setT(detail.tournament);
       setStandings(detail.tournament.standings);
@@ -111,7 +112,7 @@ export default function TournamentDetailPage() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/tournaments/${id}/${path}`, { method: "POST" });
+      const res = await fetchWithAuth(`/api/tournaments/${id}/${path}`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) setError(data.message || "Action failed.");
       await load();
