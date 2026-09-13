@@ -12,6 +12,7 @@ import MoveList from "@/components/chess/MoveList";
 import GameControls from "@/components/chess/GameControls";
 import { type GameState } from "@/lib/socket/gameEngine";
 import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
+import GameSidePanel, { type GameChatMessage } from "@/components/chess/GameSidePanel";
 
 type PlayerInfo = {
   username: string;
@@ -59,6 +60,38 @@ export default function GameRoomClient({
   const [terminatedBy, setTerminatedBy] = useState<string | undefined>(game.terminatedBy || game.termination);
   const [whiteTime, setWhiteTime] = useState<number>(game.whiteTimeMs ?? 0);
   const [blackTime, setBlackTime] = useState<number>(game.blackTimeMs ?? 0);
+
+  /**
+   * Board width in pixels, chosen by the student and remembered.
+   *
+   * The board was pinned at `max-w-[560px]` on every screen, which left most of a laptop
+   * display empty while being cramped on a large monitor. Six-year-olds want it big;
+   * someone on a 13" laptop with the panel open wants it smaller. Stored per browser
+   * because it is a display preference, not academy data.
+   */
+  // Read in the initialiser, not an effect: an effect that setStates on mount costs an
+  // extra render and makes the board visibly jump from the default to the saved size.
+  // The function form means localStorage is touched once, not on every render.
+  const [boardPx, setBoardPx] = useState(() => {
+    if (typeof window === "undefined") return 560;
+    try {
+      const saved = Number(window.localStorage.getItem("kca-board-size"));
+      if (Number.isFinite(saved) && saved >= 320 && saved <= 900) return saved;
+    } catch {
+      /* no stored preference; the default is fine */
+    }
+    return 560;
+  });
+  const changeBoardSize = (next: number) => {
+    setBoardPx(next);
+    try {
+      window.localStorage.setItem("kca-board-size", String(next));
+    } catch {
+      /* the board still resizes for this session */
+    }
+  };
+
+  const [messages, setMessages] = useState<GameChatMessage[]>([]);
 
   // UI state
   const [flashRed, setFlashRed] = useState(false);
@@ -225,6 +258,12 @@ export default function GameRoomClient({
       setDrawOffer(null);
     });
 
+    // Capped: this is a live conversation, not a transcript, and an unbounded array in a
+    // long correspondence game is a memory leak nobody would ever notice.
+    socket.on("game:chat", (message: GameChatMessage) => {
+      setMessages((prev) => [...prev, message].slice(-100));
+    });
+
     socket.on("game:move-invalid", () => {
       // Flash board red
       setFlashRed(true);
@@ -244,6 +283,7 @@ export default function GameRoomClient({
       socket.off("game:end");
       socket.off("game:draw-offered");
       socket.off("game:draw-declined");
+      socket.off("game:chat");
       socket.off("game:move-invalid");
       socket.off("game:error", onError);
     };
@@ -356,9 +396,12 @@ export default function GameRoomClient({
       </header>
 
       {/* Main layout grid */}
-      <main className="flex-1 flex flex-col lg:flex-row gap-6 p-4 md:p-6 max-w-7xl mx-auto w-full items-stretch justify-center">
-        {/* Chessboard Column */}
-        <div className="flex-1 flex flex-col justify-center max-w-[560px] mx-auto w-full gap-4">
+      <main className="flex-1 flex flex-col lg:flex-row gap-6 p-4 md:p-6 max-w-[1600px] mx-auto w-full items-stretch justify-center">
+        {/* Chessboard Column — width follows the student's chosen board size. */}
+        <div
+          className="flex flex-col justify-center mx-auto w-full gap-4"
+          style={{ maxWidth: `${boardPx}px` }}
+        >
           {/* Opponent Bar */}
           <div className="flex items-center justify-between p-3 bg-kca-surface border border-kca-border rounded-xl">
             <div className="flex items-center gap-3">
@@ -380,7 +423,7 @@ export default function GameRoomClient({
           {/* Chessboard Wrapper */}
           <div
             className={cn(
-              "aspect-square w-full max-w-[560px] bg-kca-surface border border-kca-border rounded-2xl overflow-hidden p-1.5 transition-all duration-300 shadow-cyan-sm hover:shadow-cyan-md",
+              "aspect-square w-full bg-kca-surface border border-kca-border rounded-2xl overflow-hidden p-1.5 transition-all duration-300 shadow-cyan-sm hover:shadow-cyan-md",
               flashRed && "ring-4 ring-kca-danger shadow-[0_0_30px_rgba(239,68,68,0.5)] border-kca-danger scale-[1.01]"
             )}
           >
@@ -388,8 +431,29 @@ export default function GameRoomClient({
               fen={fen}
               orientation={orientation}
               onMove={handleMove}
-              disabled={initialIsFinished || isSpectator || !isOngoing || (orientation === "white" && game.turn === "b") || (orientation === "black" && game.turn === "w")}
+              // `turn` (read from the FEN), not `game.turn`. The stale-field bug that ran
+              // the wrong clock also decided whether you were allowed to move: a stale
+              // "not your turn" locked the board while your own clock ran down.
+              disabled={initialIsFinished || isSpectator || !isOngoing || (orientation === "white" && turn === "b") || (orientation === "black" && turn === "w")}
               lastMove={lastMove}
+            />
+          </div>
+
+          {/* Board size. A slider rather than a corner drag: it works with a finger, a
+              trackpad and a keyboard, and a five-year-old can use it. */}
+          <div className="hidden items-center gap-3 px-1 lg:flex">
+            <label htmlFor="board-size" className="text-[11px] uppercase tracking-wider text-kca-gray-400">
+              Board size
+            </label>
+            <input
+              id="board-size"
+              type="range"
+              min={360}
+              max={900}
+              step={20}
+              value={boardPx}
+              onChange={(event) => changeBoardSize(Number(event.target.value))}
+              className="h-1 flex-1 cursor-pointer accent-kca-cyan"
             />
           </div>
 
@@ -413,7 +477,7 @@ export default function GameRoomClient({
         </div>
 
         {/* Right Sidebar Column */}
-        <div className="w-full lg:w-[380px] flex flex-col gap-4 justify-between lg:max-h-[690px]">
+        <div className="w-full lg:w-[380px] flex flex-col gap-4">
           {/* Moves list card */}
           <div className="flex-1 min-h-[300px] flex flex-col bg-kca-surface border border-kca-border rounded-xl overflow-hidden shadow-sm">
             <div className="border-b border-kca-border p-4 bg-kca-surface-2">
@@ -425,6 +489,14 @@ export default function GameRoomClient({
               <MoveList moves={game.moves || []} />
             </div>
           </div>
+
+          <GameSidePanel
+            gameId={gameId}
+            userId={userId}
+            messages={messages}
+            canChat={isPlayer && !initialIsFinished}
+            onSend={(body) => getSocket().emit("game:chat", { gameId, body })}
+          />
 
           {/* Draw offer notification banner */}
           {drawOffer && (
