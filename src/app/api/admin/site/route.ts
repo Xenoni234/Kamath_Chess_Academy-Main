@@ -39,7 +39,9 @@ const coachSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(2).max(80),
   title: z.string().trim().max(80).optional().or(z.literal("")),
-  bio: z.string().trim().max(400).optional().or(z.literal("")),
+  // 1200, not 400: a coach's credentials are a list — titles, ratings, championships,
+  // awards — and the first real one entered came close to the old limit.
+  bio: z.string().trim().max(1200).optional().or(z.literal("")),
   displayOrder: z.coerce.number().int().min(0).max(999).default(0),
   published: z.coerce.boolean().default(true),
 });

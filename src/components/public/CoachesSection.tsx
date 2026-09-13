@@ -55,7 +55,20 @@ function CoachCard({ coach, duplicate }: { coach: Coach; duplicate: boolean }) {
         </p>
       )}
       {coach.bio && (
-        <p className="mt-4 font-sans text-sm leading-relaxed text-kca-gray-400">{coach.bio}</p>
+        /*
+         * `whitespace-pre-line` so the line breaks the owner typed survive.
+         *
+         * HTML collapses newlines, so a bio entered as one achievement per line rendered as
+         * a single run-on paragraph — "…Championship in 2019 Received the prestigious…" with
+         * no break where the writer put one.
+         *
+         * Left-aligned, even though the card is centred: a centred block of six lines is
+         * genuinely hard to read, because the eye has to hunt for where each line starts.
+         * The name and title stay centred under the portrait.
+         */
+        <p className="mt-4 whitespace-pre-line text-left font-sans text-sm leading-relaxed text-kca-gray-400">
+          {coach.bio}
+        </p>
       )}
     </div>
   );
