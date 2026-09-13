@@ -107,6 +107,28 @@ export default function InviteCodesClient() {
     }
   }
 
+  /**
+   * Remove the row entirely, rather than leaving it in the list as "withdrawn".
+   *
+   * The server only allows this for codes that were never used — a used code is the
+   * record of who was granted staff access and stays.
+   */
+  async function remove(id: string) {
+    if (!confirm("Remove this code from the list? It was never used, so nothing is lost.")) return;
+    setBusy(true);
+    try {
+      const res = await fetchWithAuth(`/api/admin/invite-codes/${id}?hard=1`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message ?? "Could not remove that code.");
+        return;
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function statusOf(c: InviteCode): { label: string; tone: string } {
     if (c.usedAt) return { label: `used by ${c.usedBy?.username ?? "someone"}`, tone: "text-kca-gray-400" };
     if (c.revokedAt) return { label: "withdrawn", tone: "text-kca-danger" };
@@ -243,16 +265,29 @@ export default function InviteCodesClient() {
                     <td className="px-4 py-3 text-kca-gray-400">{c.note ?? "—"}</td>
                     <td className={`px-4 py-3 ${status.tone}`}>{status.label}</td>
                     <td className="px-4 py-3 text-right">
-                      {isOpen && (
-                        <button
-                          type="button"
-                          className="text-xs text-kca-danger hover:underline disabled:opacity-40"
-                          disabled={busy}
-                          onClick={() => revoke(c.id)}
-                        >
-                          Withdraw
-                        </button>
-                      )}
+                      <div className="flex items-center justify-end gap-3">
+                        {isOpen && (
+                          <button
+                            type="button"
+                            className="text-xs text-kca-warning hover:underline disabled:opacity-40"
+                            disabled={busy}
+                            onClick={() => revoke(c.id)}
+                          >
+                            Withdraw
+                          </button>
+                        )}
+                        {/* A used code is history and has no Remove — the server refuses it too. */}
+                        {!c.usedAt && (
+                          <button
+                            type="button"
+                            className="text-xs text-kca-danger hover:underline disabled:opacity-40"
+                            disabled={busy}
+                            onClick={() => remove(c.id)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

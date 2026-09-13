@@ -20,7 +20,16 @@ const HR_CREATABLE = ["STUDENT", "PARENT", "COACH"];
 
 export default function AdminUsersClient({ viewerRole }: { viewerRole: string }) {
   const [users, setUsers] = useState<User[]>([]);
-  const [roleFilter, setRoleFilter] = useState("");
+  /**
+   * Seeded from `?role=` so the Head dashboard's "Coaches" card can land here already
+   * filtered. Read once, as the initial value — reading it on every render would fight
+   * the user the moment they changed the dropdown.
+   */
+  const [roleFilter, setRoleFilter] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const wanted = new URLSearchParams(window.location.search).get("role") ?? "";
+    return ["STUDENT", "PARENT", "COACH", "HR", "HEAD"].includes(wanted) ? wanted : "";
+  });
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "err"; text: string } | null>(null);

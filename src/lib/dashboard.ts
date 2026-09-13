@@ -108,10 +108,17 @@ export async function getHeadCards(): Promise<StatCard[]> {
     db.game.count(),
   ]);
   const total = revenue._sum.amount ? revenue._sum.amount.toNumber() : 0;
+  // Every card links somewhere. A number with no way to see what is behind it invites the
+  // question it cannot answer — "six users, but which six?"
   return [
-    { label: "Total Users", value: users },
-    { label: "Coaches", value: coaches },
-    { label: "Revenue", value: `₹${total.toLocaleString("en-IN")}`, hint: "Completed payments" },
-    { label: "Games Played", value: games },
+    { label: "Total Users", value: users, href: "/dashboard/admin/users", hint: "See everyone" },
+    { label: "Coaches", value: coaches, href: "/dashboard/admin/users?role=COACH", hint: "See the coaching team" },
+    {
+      label: "Revenue",
+      value: `₹${total.toLocaleString("en-IN")}`,
+      href: "/dashboard/admin/payments",
+      hint: "Money in and out",
+    },
+    { label: "Games Played", value: games, href: "/dashboard/admin/games", hint: "Every game on the site" },
   ];
 }

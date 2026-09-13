@@ -47,6 +47,30 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
         { status: 409 },
       );
     }
+
+    /**
+     * `?hard=1` removes the row instead of marking it revoked.
+     *
+     * Revoking is the right default: a code that was issued and withdrawn is a record of
+     * an intent to grant staff access, and keeping it means the list shows what happened.
+     * But a withdrawn code then sits in the list forever with nothing to do about it, so
+     * there has to be a way to tidy up.
+     *
+     * Only ever for codes that were NEVER USED — that is the check above, and it is what
+     * keeps this from being a way to erase the trail of who was granted staff access. A
+     * used code is history and stays.
+     */
+    if (request.nextUrl.searchParams.get("hard") === "1") {
+      await db.inviteCode.delete({ where: { id } });
+      await writeAuditLog({
+        action: "invite.delete",
+        userId: payload.userId,
+        metadata: { inviteId: id, role: existing.role, wasRevoked: Boolean(existing.revokedAt) },
+        request,
+      });
+      return NextResponse.json({ success: true, deleted: true });
+    }
+
     if (existing.revokedAt) {
       return NextResponse.json({ success: true, alreadyRevoked: true });
     }
