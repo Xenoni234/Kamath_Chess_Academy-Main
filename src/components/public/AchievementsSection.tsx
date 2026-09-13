@@ -113,7 +113,7 @@ export default function AchievementsSection() {
   const duration = `${Math.max(28, half * 8)}s`;
 
   return (
-    <section id="achievements" className="relative overflow-hidden bg-[#0D0D0D] px-6 py-20 md:px-8">
+    <section id="achievements" className="relative overflow-hidden bg-kca-surface px-6 py-20 md:px-8">
       <div
         className="pointer-events-none absolute bottom-0 right-0 h-96 w-96"
         style={{ backgroundImage: "radial-gradient(circle, rgba(0, 200, 232, 0.05) 0%, transparent 70%)" }}
