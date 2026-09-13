@@ -2,7 +2,19 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
-export const revalidate = 300;
+/**
+ * NOT cached, deliberately.
+ *
+ * This had `revalidate = 300`, which is a reasonable default for public marketing content
+ * — and wrong here. The academy owner edits this from the dashboard and then looks at the
+ * homepage to check it worked. A five-minute stale window meant they saw the old version
+ * and concluded the save had failed. Content you can edit has to be content you can see.
+ *
+ * The cost is one small query per homepage load. At this platform's scale — a few dozen
+ * users, five concurrent at most — that is nothing, and it can be revisited if the site
+ * ever gets traffic that makes caching worth a lag.
+ */
+export const dynamic = "force-dynamic";
 
 /**
  * Everything the public homepage needs that comes from the database: the headline stats,

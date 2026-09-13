@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 
 /**
@@ -104,6 +104,43 @@ export default function WebsiteContentPage() {
     }
   }
 
+  /**
+   * Load an existing entry into the form above.
+   *
+   * The API has always supported editing — a POST carrying an `id` updates rather than
+   * creates — but nothing in the UI ever set that id, so the only way to correct a typo
+   * was to delete the entry and retype it, losing the photo with it.
+   *
+   * The file input is deliberately left empty: an absent photo on save means "keep the one
+   * you have", so editing a name cannot silently wipe the picture.
+   */
+  function editAchievement(a: Achievement) {
+    setAch({
+      id: a.id,
+      name: a.name,
+      achievement: a.achievement,
+      // `<input type="date">` wants exactly YYYY-MM-DD.
+      achievedOn: a.achievedOn.slice(0, 10),
+      displayOrder: String(a.displayOrder),
+      published: a.published,
+    });
+    if (achPhoto.current) achPhoto.current.value = "";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function editCoach(c: Coach) {
+    setCoach({
+      id: c.id,
+      name: c.name,
+      title: c.title ?? "",
+      bio: c.bio ?? "",
+      displayOrder: String(c.displayOrder),
+      published: c.published,
+    });
+    if (coachPhoto.current) coachPhoto.current.value = "";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function remove(kind: "achievement" | "coach", id: string, name: string) {
     if (!confirm(`Remove "${name}" from the website?`)) return;
     setBusy(true);
@@ -142,6 +179,25 @@ export default function WebsiteContentPage() {
         <h2 className="mb-4 text-sm font-bold uppercase tracking-wider text-kca-white">
           Our Champions ({achievements.length})
         </h2>
+
+        {ach.id && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-kca-cyan/30 bg-kca-cyan/5 px-4 py-2.5">
+            <p className="text-xs text-kca-gray-100">
+              Editing <strong className="text-kca-white">{ach.name || "this entry"}</strong>. Leave the
+              photo empty to keep the current one.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setAch({ ...EMPTY_ACHIEVEMENT });
+                if (achPhoto.current) achPhoto.current.value = "";
+              }}
+              className="flex shrink-0 items-center gap-1 text-xs text-kca-gray-400 hover:text-kca-white"
+            >
+              <X className="h-3.5 w-3.5" /> Cancel
+            </button>
+          </div>
+        )}
 
         <div className="mb-6 grid gap-3 sm:grid-cols-2">
           <input
@@ -183,7 +239,8 @@ export default function WebsiteContentPage() {
             disabled={busy || !ach.name.trim() || !ach.achievement.trim() || !ach.achievedOn}
             className="btn-primary sm:col-span-2 disabled:opacity-50"
           >
-            <Plus className="h-4 w-4" /> {ach.id ? "Save changes" : "Add champion"}
+            {ach.id ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {ach.id ? "Save changes" : "Add champion"}
           </button>
         </div>
 
@@ -214,6 +271,15 @@ export default function WebsiteContentPage() {
                 {!a.published && <span className="text-xs text-kca-warning">hidden</span>}
                 <button
                   type="button"
+                  onClick={() => editAchievement(a)}
+                  disabled={busy}
+                  aria-label={`Edit ${a.name}`}
+                  className="text-kca-cyan hover:opacity-70 disabled:opacity-40"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => remove("achievement", a.id, a.name)}
                   disabled={busy}
                   aria-label={`Remove ${a.name}`}
@@ -232,6 +298,25 @@ export default function WebsiteContentPage() {
         <h2 className="mb-4 text-sm font-bold uppercase tracking-wider text-kca-white">
           Our Coaches ({coaches.length})
         </h2>
+
+        {coach.id && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-kca-cyan/30 bg-kca-cyan/5 px-4 py-2.5">
+            <p className="text-xs text-kca-gray-100">
+              Editing <strong className="text-kca-white">{coach.name || "this coach"}</strong>. Leave the
+              photo empty to keep the current one.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setCoach({ ...EMPTY_COACH });
+                if (coachPhoto.current) coachPhoto.current.value = "";
+              }}
+              className="flex shrink-0 items-center gap-1 text-xs text-kca-gray-400 hover:text-kca-white"
+            >
+              <X className="h-3.5 w-3.5" /> Cancel
+            </button>
+          </div>
+        )}
 
         <div className="mb-6 grid gap-3 sm:grid-cols-2">
           <input
@@ -274,7 +359,8 @@ export default function WebsiteContentPage() {
             disabled={busy || !coach.name.trim()}
             className="btn-primary sm:col-span-2 disabled:opacity-50"
           >
-            <Plus className="h-4 w-4" /> Add coach
+            {coach.id ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {coach.id ? "Save changes" : "Add coach"}
           </button>
         </div>
 
@@ -304,6 +390,15 @@ export default function WebsiteContentPage() {
                   <p className="truncate text-xs text-kca-gray-400">{c.title ?? "—"}</p>
                 </div>
                 {!c.published && <span className="text-xs text-kca-warning">hidden</span>}
+                <button
+                  type="button"
+                  onClick={() => editCoach(c)}
+                  disabled={busy}
+                  aria-label={`Edit ${c.name}`}
+                  className="text-kca-cyan hover:opacity-70 disabled:opacity-40"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => remove("coach", c.id, c.name)}
