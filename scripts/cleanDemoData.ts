@@ -1,8 +1,14 @@
 /**
  * Remove seeded demo data and zero out money, WITHOUT touching real accounts.
  *
- *   npx tsx --env-file=.env.local scripts/cleanDemoData.ts            # dry run, shows what it would do
- *   npx tsx --env-file=.env.local scripts/cleanDemoData.ts --yes      # actually do it
+ *   npx tsx --env-file=.env.local scripts/cleanDemoData.ts                       # dry run
+ *   npx tsx --env-file=.env.local scripts/cleanDemoData.ts --yes                 # apply
+ *   npx tsx --env-file=.env.local scripts/cleanDemoData.ts --users=a,b --batches=test
+ *
+ * `--users` and `--batches` name extra things to remove beyond the seeded `demo*` set —
+ * for accounts and batches created by hand during testing, which no prefix identifies.
+ * They are matched EXACTLY and case-sensitively: a prefix match on hand-typed names is
+ * how you delete a real student called "testa" while aiming at "test".
  *
  * `resetTestData.ts` deletes every row in every table. That was the right tool while the
  * platform had no users; it is the wrong one now that real students have accounts. This is
@@ -28,25 +34,121 @@ const DEMO_PREFIX = "demo";
 const SEEDED_BATCH_NOTE = "Seeded by scripts/seedDemoAccounts.ts";
 const LIVE = !process.argv.includes("--dry-run") && process.argv.includes("--yes");
 
+/** `--users=a,b` / `--batches=x,y` — exact names, never prefixes. */
+function listArg(name: string): string[] {
+  const raw = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (!raw) return [];
+  return raw.slice(name.length + 3).split(",").map((v) => v.trim()).filter(Boolean);
+}
+const EXTRA_USERS = listArg("users");
+const EXTRA_BATCHES = listArg("batches");
+
+/** Wipe every batch and class, not just named ones — pre-launch scheduling test data. */
+const ALL_SCHEDULING = process.argv.includes("--all-classes");
+
+/**
+ * Also delete games the removed accounts played.
+ *
+ * `Game.whiteUserId` is `SetNull`, so deleting a player leaves the game behind with an
+ * empty seat. That is correct for real history — a game two people played happened, even
+ * after one deletes their account — but for test games it leaves ghosts in everyone's
+ * Games list with a blank opponent.
+ */
+const DROP_GAMES = process.argv.includes("--games");
+
+/**
+ * Clear the audit entries belonging to the accounts being removed — and ONLY those.
+ *
+ * Not the whole log. `AuditLog` is the record DPDPA expects of who looked at whose
+ * personal data, and the entries for accounts that are staying are still that record.
+ * Wiping the table to tidy up three test accounts would throw away the trail for six real
+ * ones.
+ *
+ * Note `AuditLog.userId` is `SetNull`, so deleting a user leaves their rows behind with a
+ * null actor rather than removing them. That is deliberate in the schema — an erasure has
+ * to stay provable — which is exactly why removing them needs its own explicit flag.
+ */
+const CLEAR_AUDIT = process.argv.includes("--audit");
+
 async function main() {
   console.log(LIVE ? "MODE: LIVE — changes will be written\n" : "MODE: DRY RUN — nothing will change\n");
 
   // ---- 1. Demo accounts -----------------------------------------------------
   const demoUsers = await db.user.findMany({
-    where: { username: { startsWith: DEMO_PREFIX } },
+    where: {
+      OR: [
+        { username: { startsWith: DEMO_PREFIX } },
+        ...(EXTRA_USERS.length ? [{ username: { in: EXTRA_USERS } }] : []),
+      ],
+    },
     select: { id: true, username: true, role: true, email: true },
   });
+
+  // A named account that does not exist is almost always a typo, and silently deleting
+  // nothing is worse than saying so.
+  for (const wanted of EXTRA_USERS) {
+    if (!demoUsers.some((u) => u.username === wanted)) {
+      console.log(`   ! no account named "${wanted}" — check the spelling`);
+    }
+  }
+
+  const heads = demoUsers.filter((u) => u.role === "HEAD");
+  if (heads.length) {
+    console.error(
+      `\nREFUSING: this would delete the HEAD account(s) ${heads.map((h) => h.username).join(", ")}.\n` +
+        "The academy owner's account is not test data. Remove it from --users and re-run.",
+    );
+    process.exit(1);
+  }
 
   console.log(`Demo accounts (username starts with "${DEMO_PREFIX}"): ${demoUsers.length}`);
   for (const u of demoUsers) console.log(`   - ${u.username} (${u.role})`);
 
   // ---- 2. Seeded batches and their classes ----------------------------------
   const demoBatches = await db.batch.findMany({
-    where: { description: SEEDED_BATCH_NOTE },
+    where: {
+      OR: [
+        { description: SEEDED_BATCH_NOTE },
+        ...(EXTRA_BATCHES.length ? [{ name: { in: EXTRA_BATCHES } }] : []),
+      ],
+    },
     select: { id: true, name: true, _count: { select: { classes: true } } },
   });
-  console.log(`\nSeeded batches: ${demoBatches.length}`);
-  for (const b of demoBatches) console.log(`   - ${b.name} (${b._count.classes} classes)`);
+  const allBatches = ALL_SCHEDULING
+    ? await db.batch.findMany({ select: { id: true, name: true, _count: { select: { classes: true } } } })
+    : demoBatches;
+  const targetBatches = ALL_SCHEDULING ? allBatches : demoBatches;
+
+  console.log(`\n${ALL_SCHEDULING ? "ALL batches" : "Seeded batches"}: ${targetBatches.length}`);
+  for (const b of targetBatches) console.log(`   - ${b.name} (${b._count.classes} classes)`);
+
+  const classCount = ALL_SCHEDULING ? await db.class.count() : 0;
+  if (ALL_SCHEDULING) {
+    const classes = await db.class.findMany({ select: { title: true, status: true } });
+    console.log(`\nALL classes: ${classCount}`);
+    for (const c of classes) console.log(`   - ${c.title} [${c.status}]`);
+  }
+
+  const gamesToDrop = DROP_GAMES && demoUsers.length
+    ? await db.game.count({
+        where: {
+          OR: [
+            { whiteUserId: { in: demoUsers.map((u) => u.id) } },
+            { blackUserId: { in: demoUsers.map((u) => u.id) } },
+          ],
+        },
+      })
+    : 0;
+  if (DROP_GAMES) console.log(`\nGames played by those accounts: ${gamesToDrop}`);
+
+  const auditCount =
+    CLEAR_AUDIT && demoUsers.length
+      ? await db.auditLog.count({ where: { userId: { in: demoUsers.map((u) => u.id) } } })
+      : 0;
+  if (CLEAR_AUDIT) {
+    const total = await db.auditLog.count();
+    console.log(`\nAudit log entries for those accounts: ${auditCount} (of ${total} total — the rest stay)`);
+  }
 
   // ---- 3. Money -------------------------------------------------------------
   const [paymentCount, invoiceCount] = await Promise.all([
@@ -95,9 +197,29 @@ async function main() {
   await db.invoiceCounter.deleteMany({});
   console.log("   invoice counter reset");
 
-  // Seeded batches. Classes cascade from the batch relation where the schema says so;
+  if (DROP_GAMES && demoUsers.length) {
+    const ids = demoUsers.map((u) => u.id);
+    const { count } = await db.game.deleteMany({
+      where: { OR: [{ whiteUserId: { in: ids } }, { blackUserId: { in: ids } }] },
+    });
+    console.log(`   ${count} game(s) deleted`);
+  }
+
+  if (ALL_SCHEDULING) {
+    const cls = await db.class.deleteMany({});
+    console.log(`   ${cls.count} class(es) deleted`);
+  }
+
+  if (CLEAR_AUDIT && demoUsers.length) {
+    const { count } = await db.auditLog.deleteMany({
+      where: { userId: { in: demoUsers.map((u) => u.id) } },
+    });
+    console.log(`   ${count} audit log entr(ies) cleared for the removed accounts`);
+  }
+
+  // Batches. Classes cascade from the batch relation where the schema says so;
   // deleting them explicitly first keeps this correct either way.
-  for (const batch of demoBatches) {
+  for (const batch of targetBatches) {
     await db.class.deleteMany({ where: { batchId: batch.id } });
     await db.batch.delete({ where: { id: batch.id } });
     console.log(`   batch "${batch.name}" and its classes deleted`);
