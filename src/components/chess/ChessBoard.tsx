@@ -44,8 +44,33 @@ export default function ChessBoard({
     to: string;
   } | null>(null);
 
+  /**
+   * Tap-to-move: tap the piece, then tap the destination.
+   *
+   * Dragging was the only way to move, which is genuinely hard for the academy's youngest
+   * students — they start at five — and hopeless on a phone or trackpad. Tapping is how
+   * Lichess and Chess.com both work, and it is the accessible option besides: a drag needs
+   * sustained fine motor control, a tap does not.
+   *
+   * Dragging still works exactly as before. These are two ways to make the same move, and
+   * the drag handler and the tap handler go through the SAME `onMove`, so a consumer that
+   * rejects a move (the puzzle page rejects a wrong guess) rejects it either way.
+   */
+  const [selected, setSelected] = useState<string | null>(null);
+  /** Square to flash red for a moment, when a tap names an illegal destination. */
+  const [rejected, setRejected] = useState<string | null>(null);
+
   // Parse FEN to check if king is in check
   const chess = new Chess(fen);
+
+  // Drop any tap selection when the position changes — after the opponent moves, a square
+  // held from the previous position points at a piece that may no longer be there.
+  const [selectionFen, setSelectionFen] = useState(fen);
+  if (fen !== selectionFen) {
+    setSelectionFen(fen);
+    setSelected(null);
+    setRejected(null);
+  }
   const customSquareStyles: Record<string, React.CSSProperties> = {};
 
   // Highlight King in check
@@ -62,6 +87,37 @@ export default function ChessBoard({
         }
       }
     }
+  }
+
+  // Tap-to-move highlights. Drawn before the last-move highlight so an explicit
+  // selection reads on top of the ambient one.
+  if (selected) {
+    customSquareStyles[selected] = {
+      ...customSquareStyles[selected],
+      backgroundColor: "rgba(0, 200, 232, 0.45)",
+    };
+    let targets: { to: string }[] = [];
+    try {
+      targets = chess.moves({ square: selected as Square, verbose: true });
+    } catch {
+      targets = [];
+    }
+    for (const move of targets) {
+      // A ring rather than a fill, so the piece underneath a capture stays readable.
+      customSquareStyles[move.to] = {
+        ...customSquareStyles[move.to],
+        boxShadow: "inset 0 0 0 4px rgba(0, 200, 232, 0.55)",
+      };
+    }
+  }
+
+  // An illegal tap gets the same red the in-check king gets — the student already knows
+  // that colour means "not allowed", so it needs no explaining.
+  if (rejected) {
+    customSquareStyles[rejected] = {
+      ...customSquareStyles[rejected],
+      backgroundColor: "rgba(239, 68, 68, 0.55)",
+    };
   }
 
   // Highlight Last Move
@@ -117,7 +173,75 @@ export default function ChessBoard({
       return false; // wait for promotion-piece selection before committing
     }
 
+    setSelected(null);
     return onMove(sourceSquare, targetSquare) !== false;
+  };
+
+  /** Commit a move chosen by tapping, routing promotions through the same dialog. */
+  const commitTap = (from: string, to: string) => {
+    const piece = chess.get(from as Square);
+    const isPromotion =
+      piece?.type === "p" &&
+      ((piece.color === "w" && to[1] === "8") || (piece.color === "b" && to[1] === "1"));
+
+    if (isPromotion) {
+      setPendingPromotion({ from, to });
+      setSelected(null);
+      return;
+    }
+
+    // A consumer may reject the move (the puzzle page rejects a wrong guess). When it
+    // does, keep the piece selected so the student can simply tap somewhere else.
+    if (onMove(from, to) === false) {
+      flashRejected(to);
+      return;
+    }
+    setSelected(null);
+  };
+
+  const flashRejected = (square: string) => {
+    setRejected(square);
+    window.setTimeout(() => setRejected((current) => (current === square ? null : current)), 600);
+  };
+
+  const handleSquareClick = ({ square }: { square: string }) => {
+    if (disabled) return;
+
+    if (selected === square) {
+      setSelected(null);
+      return;
+    }
+
+    if (selected) {
+      let legal: { to: string }[] = [];
+      try {
+        legal = chess.moves({ square: selected as Square, verbose: true });
+      } catch {
+        legal = [];
+      }
+
+      if (legal.some((m) => m.to === square)) {
+        commitTap(selected, square);
+        return;
+      }
+
+      // Tapping another of your own pieces re-selects rather than erroring — that is
+      // what a player means by it, and treating it as a mistake would be pedantic.
+      const own = chess.get(square as Square);
+      if (own && own.color === chess.turn()) {
+        setSelected(square);
+        return;
+      }
+
+      // A genuinely illegal destination: say so, briefly, in red.
+      flashRejected(square);
+      setSelected(null);
+      return;
+    }
+
+    // Nothing selected yet — only a piece of the side to move can be picked up.
+    const piece = chess.get(square as Square);
+    if (piece && piece.color === chess.turn()) setSelected(square);
   };
 
   const handlePromote = (pieceType: "q" | "r" | "b" | "n") => {
@@ -134,6 +258,7 @@ export default function ChessBoard({
           position: fen,
           boardOrientation: orientation,
           onPieceDrop: handlePieceDrop,
+          onSquareClick: handleSquareClick,
           allowDragging: !disabled,
           darkSquareStyle: { backgroundColor: "#769656" },
           lightSquareStyle: { backgroundColor: "#EEEED2" },
