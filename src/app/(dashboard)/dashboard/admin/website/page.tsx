@@ -331,13 +331,19 @@ export default function WebsiteContentPage() {
             value={coach.title}
             onChange={(e) => setCoach((v) => ({ ...v, title: e.target.value }))}
           />
-          <textarea
-            className="input-field resize-none sm:col-span-2"
-            rows={2}
-            placeholder="A sentence or two about them"
-            value={coach.bio}
-            onChange={(e) => setCoach((v) => ({ ...v, bio: e.target.value }))}
-          />
+          <div className="sm:col-span-2">
+            <textarea
+              className="input-field w-full resize-y"
+              rows={6}
+              maxLength={1200}
+              placeholder={"About them — press Enter for a new line.\n\nInternational Master, FIDE rating 2366\nWon the Western Asian Under-18 Championship, 2019"}
+              value={coach.bio}
+              onChange={(e) => setCoach((v) => ({ ...v, bio: e.target.value }))}
+            />
+            <p className="mt-1 text-xs text-kca-gray-400">
+              Each line you type appears as its own line on the website. {1200 - coach.bio.length} characters left.
+            </p>
+          </div>
           <div>
             <label className="mb-1 block text-xs uppercase tracking-wider text-kca-gray-400">
               Photo (optional, max 2 MB)
