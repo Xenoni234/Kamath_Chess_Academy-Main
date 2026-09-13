@@ -58,7 +58,12 @@ function Card({ item, duplicate }: { item: Achievement; duplicate: boolean }) {
         )}
 
         <h3 className="mb-2 font-display text-xl font-bold text-kca-white">{item.name}</h3>
-        <p className="mb-6 font-sans text-sm leading-relaxed text-kca-gray-400">{item.achievement}</p>
+        {/* gray-100 and a medium weight, not gray-400 at normal.
+            gray-100 is BRIGHT in dark (#E0E0E0) and very dark in light (#1C2027), so this
+            reads better in both themes rather than fixing one at the other's expense. */}
+        <p className="mb-6 font-sans text-sm font-medium leading-relaxed text-kca-gray-100">
+          {item.achievement}
+        </p>
       </div>
 
       <div className="font-display text-xs font-semibold uppercase tracking-wider text-kca-cyan">

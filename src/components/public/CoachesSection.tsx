@@ -66,7 +66,7 @@ function CoachCard({ coach, duplicate }: { coach: Coach; duplicate: boolean }) {
          * genuinely hard to read, because the eye has to hunt for where each line starts.
          * The name and title stay centred under the portrait.
          */
-        <p className="mt-4 whitespace-pre-line text-left font-sans text-sm leading-relaxed text-kca-gray-400">
+        <p className="mt-4 whitespace-pre-line text-left font-sans text-sm font-medium leading-relaxed text-kca-gray-100">
           {coach.bio}
         </p>
       )}
