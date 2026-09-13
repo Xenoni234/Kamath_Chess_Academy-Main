@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { sanForUci } from "@/lib/engine/analysis";
 import ChessBoard from "@/components/chess/ChessBoard";
 import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
+import EnginePrefetch from "@/components/analysis/EnginePrefetch";
 
 type PuzzleData = {
   id: string;
@@ -333,6 +334,7 @@ export default function PuzzlesPage() {
 
   return (
     <div className="w-full max-w-6xl mx-auto">
+      <EnginePrefetch />
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-3xl font-display font-bold text-kca-white mb-2">Puzzles</h1>
