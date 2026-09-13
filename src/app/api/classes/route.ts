@@ -66,15 +66,31 @@ const CLASS_PAGE_SIZE = 200;
  * A class that was scheduled and simply never started is "ended" once its time
  * has passed. It is not upcoming — nobody is going to attend it now — and
  * leaving it in the upcoming list buries the classes that really are next.
+ *
+ * The mirror of that: a class the coach STARTED and never ended used to stay "LIVE NOW"
+ * forever, because `ongoing` was `status: ONGOING` with no clock at all. Nothing sets a
+ * class to COMPLETED except a coach pressing End class, and coaches close the tab. A
+ * student saw "Enter room" on a class that had finished hours earlier and joined an empty
+ * room.
+ *
+ * `LIVE_GRACE_MS` is deliberately generous, because the two mistakes are not equally bad:
+ * showing a finished class as live wastes a click, while hiding a class that is genuinely
+ * running locks students out of a lesson they are paying for. An hour past the scheduled
+ * finish covers any real overrun; past that it is abandoned, not running.
  */
+const LIVE_GRACE_MS = 60 * 60 * 1000;
+
 function bucketsFor(now: Date) {
+  const staleLive = new Date(now.getTime() - LIVE_GRACE_MS);
   return {
-    ongoing: { status: "ONGOING" as const },
+    ongoing: { status: "ONGOING" as const, endsAt: { gte: staleLive } },
     upcoming: { status: "SCHEDULED" as const, endsAt: { gte: now } },
     ended: {
       OR: [
         { status: { in: ["COMPLETED", "CANCELLED"] as ClassStatus[] } },
         { status: "SCHEDULED" as const, endsAt: { lt: now } },
+        // Started, never ended, and long past its finish — abandoned, not live.
+        { status: "ONGOING" as const, endsAt: { lt: staleLive } },
       ],
     },
   };
