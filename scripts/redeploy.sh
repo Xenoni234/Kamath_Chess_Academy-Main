@@ -45,6 +45,24 @@ echo
 echo "==> Pulling"
 git pull --ff-only origin main
 
+# Re-exec if the pull changed THIS script.
+#
+# Bash reads a script incrementally from a file offset, so `git pull` rewriting
+# redeploy.sh mid-run means the rest of the file is read from the NEW bytes at an offset
+# computed against the OLD ones. In the best case you run the old logic; in the worst you
+# run a line spliced out of the middle of a different one.
+#
+# This bit us for real: the deploy that fixed parallel builds pulled itself in, then went
+# on to build in parallel anyway, because bash was already past that point. The fix only
+# took effect one deploy later — which is the sort of thing that looks like the fix not
+# working.
+#
+# `KCA_REDEPLOY_REEXEC` guards against looping if the script somehow keeps changing.
+if [ -z "${KCA_REDEPLOY_REEXEC:-}" ] && ! git diff --quiet HEAD@{1} HEAD -- "$0" 2>/dev/null; then
+  echo "    This script changed in that pull — restarting it so the new version runs."
+  KCA_REDEPLOY_REEXEC=1 exec "$0" "$@"
+fi
+
 echo
 # Build ONE image at a time. This box has 2 vCPUs and a few GB of RAM, and
 # `docker compose up --build` builds `app` and `worker` in PARALLEL — two Next.js
