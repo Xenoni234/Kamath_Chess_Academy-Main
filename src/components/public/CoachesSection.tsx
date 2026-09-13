@@ -30,14 +30,14 @@ type Coach = {
 
 function CoachCard({ coach, duplicate }: { coach: Coach; duplicate: boolean }) {
   return (
-    <div aria-hidden={duplicate} className="card flex w-72 shrink-0 flex-col">
+    <div aria-hidden={duplicate} className="card flex w-72 shrink-0 flex-col items-center text-center">
       {coach.hasPhoto ? (
-        <div className="mb-6 h-24 w-24 overflow-hidden rounded-full border border-kca-cyan/20">
+        <div className="mb-6 h-40 w-40 overflow-hidden rounded-full border-2 border-kca-cyan/20">
           <Image
             src={`/api/public/photo/coach/${coach.id}`}
             alt={duplicate ? "" : coach.name}
-            width={96}
-            height={96}
+            width={320}
+            height={320}
             unoptimized
             className="h-full w-full object-cover"
           />
@@ -75,7 +75,11 @@ export default function CoachesSection() {
 
   if (!loaded || coaches.length === 0) return null;
 
-  // Seconds per card, so three coaches and thirty travel at the same visual speed.
+  // Only scroll once there is enough to scroll — below this the duplicate copy a marquee
+  // needs for its seamless loop is plainly visible and reads as a bug. See the same rule
+  // in AchievementsSection.
+  const scrolling = coaches.length >= 4;
+  // Seconds per card, so four coaches and forty travel at the same visual speed.
   const duration = `${Math.max(24, coaches.length * 7)}s`;
 
   return (
@@ -94,15 +98,23 @@ export default function CoachesSection() {
         {/* One line. The list is rendered twice and the track slides exactly -50%, so the
             second copy arrives where the first began — a seamless loop with no JavaScript
             measuring anything. The duplicate is aria-hidden or every name is read twice. */}
-        <div className="kca-marquee" style={{ "--kca-marquee-duration": duration } as React.CSSProperties}>
-          <div className="kca-marquee-track gap-8 px-4 py-2">
-            {[0, 1].map((copy) =>
-              coaches.map((coach) => (
-                <CoachCard key={`${copy}-${coach.id}`} coach={coach} duplicate={copy === 1} />
-              )),
-            )}
+        {scrolling ? (
+          <div className="kca-marquee" style={{ "--kca-marquee-duration": duration } as React.CSSProperties}>
+            <div className="kca-marquee-track gap-8 px-4 py-2">
+              {[0, 1].map((copy) =>
+                coaches.map((coach) => (
+                  <CoachCard key={`${copy}-${coach.id}`} coach={coach} duplicate={copy === 1} />
+                )),
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="mx-auto flex max-w-7xl flex-wrap justify-center gap-8 px-4">
+            {coaches.map((coach) => (
+              <CoachCard key={coach.id} coach={coach} duplicate={false} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

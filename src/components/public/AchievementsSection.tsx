@@ -33,12 +33,14 @@ function Card({ item, duplicate }: { item: Achievement; duplicate: boolean }) {
     <div aria-hidden={duplicate} className="card flex w-80 shrink-0 flex-col justify-between">
       <div>
         {item.hasPhoto ? (
-          <div className="mb-6 h-20 w-20 overflow-hidden rounded-lg border border-kca-cyan/20">
+          // Full card width. A student's face at 80px was a thumbnail of a thumbnail —
+          // these are the photographs the section exists to show.
+          <div className="mb-6 aspect-[4/3] w-full overflow-hidden rounded-lg border border-kca-cyan/20">
             <Image
               src={`/api/public/photo/achievement/${item.id}`}
               alt={duplicate ? "" : item.name}
-              width={80}
-              height={80}
+              width={480}
+              height={360}
               unoptimized
               className="h-full w-full object-cover"
             />
@@ -76,12 +78,27 @@ export default function AchievementsSection() {
   // better than an empty heading — and better than filler, which is what this replaced.
   if (!loaded || achievements.length === 0) return null;
 
-  // Split across two rows. With an odd count the top row takes the extra, so a single
-  // entry still appears rather than landing in an empty second row.
-  const half = Math.ceil(achievements.length / 2);
-  const rows = [achievements.slice(0, half), achievements.slice(half)].filter((r) => r.length > 0);
+  /**
+   * Only scroll once there is enough to scroll.
+   *
+   * A marquee renders its list TWICE so the loop is seamless. That is invisible with a
+   * dozen cards and obvious with one — the copy sits right beside the original and reads
+   * as a duplicate-entry bug. Below the threshold the section is an ordinary centred row:
+   * no duplication, no animation, nothing to misread.
+   *
+   * Two rows likewise only make sense once one row would be uncomfortably long.
+   */
+  const SCROLL_FROM = 4;
+  const TWO_ROWS_FROM = 6;
+  const scrolling = achievements.length >= SCROLL_FROM;
+  const twoRows = achievements.length >= TWO_ROWS_FROM;
 
-  // One duration for both rows — that is what makes them read as one block.
+  const half = twoRows ? Math.ceil(achievements.length / 2) : achievements.length;
+  const rows = twoRows
+    ? [achievements.slice(0, half), achievements.slice(half)].filter((r) => r.length > 0)
+    : [achievements];
+
+  // One duration for both rows — that is what makes them read as a single block.
   const duration = `${Math.max(28, half * 8)}s`;
 
   return (
@@ -99,23 +116,31 @@ export default function AchievementsSection() {
           </p>
         </div>
 
-        <div className="space-y-6">
-          {rows.map((row, rowIndex) => (
-            <div
-              key={rowIndex}
-              className="kca-marquee"
-              style={{ "--kca-marquee-duration": duration } as React.CSSProperties}
-            >
-              <div className="kca-marquee-track gap-8 px-4 py-2">
-                {[0, 1].map((copy) =>
-                  row.map((item) => (
-                    <Card key={`${copy}-${item.id}`} item={item} duplicate={copy === 1} />
-                  )),
-                )}
+        {scrolling ? (
+          <div className="space-y-6">
+            {rows.map((row, rowIndex) => (
+              <div
+                key={rowIndex}
+                className="kca-marquee"
+                style={{ "--kca-marquee-duration": duration } as React.CSSProperties}
+              >
+                <div className="kca-marquee-track gap-8 px-4 py-2">
+                  {[0, 1].map((copy) =>
+                    row.map((item) => (
+                      <Card key={`${copy}-${item.id}`} item={item} duplicate={copy === 1} />
+                    )),
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-7xl flex-wrap justify-center gap-8 px-4">
+            {achievements.map((item) => (
+              <Card key={item.id} item={item} duplicate={false} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
