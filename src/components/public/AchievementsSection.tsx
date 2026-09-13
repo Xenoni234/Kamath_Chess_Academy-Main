@@ -33,14 +33,20 @@ function Card({ item, duplicate }: { item: Achievement; duplicate: boolean }) {
     <div aria-hidden={duplicate} className="card flex w-80 shrink-0 flex-col justify-between">
       <div>
         {item.hasPhoto ? (
-          // Full card width. A student's face at 80px was a thumbnail of a thumbnail —
-          // these are the photographs the section exists to show.
-          <div className="mb-6 aspect-[4/3] w-full overflow-hidden rounded-lg border border-kca-cyan/20">
+          /*
+           * A SQUARE, not a full-width 4:3 banner.
+           *
+           * 80px was a thumbnail of a thumbnail; full width overcorrected — it filled the
+           * card and, because these photos are portraits of children holding trophies, a
+           * 4:3 landscape crop cut off their heads and feet. A square at 144px is large
+           * enough to see a face and crops a portrait far more kindly.
+           */
+          <div className="mb-5 h-36 w-36 overflow-hidden rounded-xl border border-kca-cyan/20">
             <Image
               src={`/api/public/photo/achievement/${item.id}`}
               alt={duplicate ? "" : item.name}
-              width={480}
-              height={360}
+              width={288}
+              height={288}
               unoptimized
               className="h-full w-full object-cover"
             />
