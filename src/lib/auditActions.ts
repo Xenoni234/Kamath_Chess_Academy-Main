@@ -24,6 +24,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "consent.update": "Consent changed",
   "user.anonymise": "Account erased (DPDPA)",
   "parentCode.regenerate": "Parent link code regenerated",
+  "class.room.extend": "Class time changed",
   "admin.user.create": "Staff created an account",
   "admin.user.update": "Account role or status changed",
   "admin.parentLink.create": "Parent linked to child",

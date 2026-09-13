@@ -14,6 +14,10 @@ import { type GameState } from "@/lib/socket/gameEngine";
 import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
 import GameSidePanel, { type GameChatMessage } from "@/components/chess/GameSidePanel";
 
+/** Board size bounds, in pixels. Small enough for a laptop, big enough for a classroom. */
+const MIN_BOARD_PX = 360;
+const MAX_BOARD_PX = 900;
+
 type PlayerInfo = {
   username: string;
   rating: number;
@@ -83,12 +87,52 @@ export default function GameRoomClient({
     return 560;
   });
   const changeBoardSize = (next: number) => {
-    setBoardPx(next);
+    const clamped = Math.max(MIN_BOARD_PX, Math.min(MAX_BOARD_PX, Math.round(next)));
+    setBoardPx(clamped);
     try {
-      window.localStorage.setItem("kca-board-size", String(next));
+      window.localStorage.setItem("kca-board-size", String(clamped));
     } catch {
       /* the board still resizes for this session */
     }
+  };
+
+  const [resizing, setResizing] = useState(false);
+
+  /**
+   * Drag the corner to resize.
+   *
+   * Pointer events rather than mouse events so it works with a finger and a stylus, and
+   * `setPointerCapture` so the drag survives the cursor leaving the little handle — without
+   * it the board stops following the moment you move faster than the resize can keep up,
+   * which feels broken.
+   *
+   * The board is square, so width follows whichever axis moved further; dragging
+   * diagonally does the obvious thing.
+   */
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startPx = boardPx;
+    setResizing(true);
+
+    const onMove = (move: PointerEvent) => {
+      const delta = Math.max(move.clientX - startX, move.clientY - startY);
+      changeBoardSize(startPx + delta);
+    };
+    const onUp = () => {
+      setResizing(false);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
   };
 
   const [messages, setMessages] = useState<GameChatMessage[]>([]);
@@ -423,10 +467,46 @@ export default function GameRoomClient({
           {/* Chessboard Wrapper */}
           <div
             className={cn(
-              "aspect-square w-full bg-kca-surface border border-kca-border rounded-2xl overflow-hidden p-1.5 transition-all duration-300 shadow-cyan-sm hover:shadow-cyan-md",
+              "group relative aspect-square w-full bg-kca-surface border border-kca-border rounded-2xl p-1.5 shadow-cyan-sm hover:shadow-cyan-md",
+              // No transition on size: a CSS transition fights a pointer drag and makes
+              // the board lag behind the cursor.
+              !resizing && "transition-shadow duration-300",
               flashRed && "ring-4 ring-kca-danger shadow-[0_0_30px_rgba(239,68,68,0.5)] border-kca-danger scale-[1.01]"
             )}
           >
+            {/* Grab-corner resize.
+                A slider under the board was the first attempt and it was wrong: it put a
+                settings control in the middle of a game. This is the handle every resizable
+                thing has — drag the corner, the board follows, and it is invisible until
+                you go near it. Keyboard users can still resize with the arrow keys while
+                it is focused, so dropping the slider costs nothing in accessibility. */}
+            <div
+              role="slider"
+              tabIndex={0}
+              aria-label="Resize board"
+              aria-valuemin={MIN_BOARD_PX}
+              aria-valuemax={MAX_BOARD_PX}
+              aria-valuenow={boardPx}
+              onPointerDown={startResize}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+                  changeBoardSize(Math.min(MAX_BOARD_PX, boardPx + 20));
+                } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+                  changeBoardSize(Math.max(MIN_BOARD_PX, boardPx - 20));
+                } else {
+                  return;
+                }
+                event.preventDefault();
+              }}
+              className="absolute bottom-0 right-0 z-20 hidden h-6 w-6 cursor-nwse-resize items-center justify-center rounded-br-2xl text-kca-gray-600 opacity-0 transition-opacity hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-kca-cyan lg:flex"
+              style={{ opacity: resizing ? 1 : undefined }}
+            >
+              {/* Two ticks — the standard "drag me" corner. */}
+              <svg viewBox="0 0 10 10" className="h-3 w-3" aria-hidden="true">
+                <path d="M9 1 1 9M9 5 5 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+              </svg>
+            </div>
+
             <ChessBoard
               fen={fen}
               orientation={orientation}
@@ -436,24 +516,6 @@ export default function GameRoomClient({
               // "not your turn" locked the board while your own clock ran down.
               disabled={initialIsFinished || isSpectator || !isOngoing || (orientation === "white" && turn === "b") || (orientation === "black" && turn === "w")}
               lastMove={lastMove}
-            />
-          </div>
-
-          {/* Board size. A slider rather than a corner drag: it works with a finger, a
-              trackpad and a keyboard, and a five-year-old can use it. */}
-          <div className="hidden items-center gap-3 px-1 lg:flex">
-            <label htmlFor="board-size" className="text-[11px] uppercase tracking-wider text-kca-gray-400">
-              Board size
-            </label>
-            <input
-              id="board-size"
-              type="range"
-              min={360}
-              max={900}
-              step={20}
-              value={boardPx}
-              onChange={(event) => changeBoardSize(Number(event.target.value))}
-              className="h-1 flex-1 cursor-pointer accent-kca-cyan"
             />
           </div>
 

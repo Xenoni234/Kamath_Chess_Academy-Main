@@ -145,7 +145,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   });
 }
 
-const actionSchema = z.object({ action: z.enum(["start", "end"]) });
+/**
+ * `extend` shifts the class's finish time. Bounded and signed, so a coach can add fifteen
+ * minutes when a lesson runs long or pull it in when it finishes early — the class now
+ * ends itself at `endsAt`, and an automatic end with no way to adjust it would cut a coach
+ * off mid-explanation.
+ *
+ * ±120 minutes per call: enough for any real adjustment, small enough that a stuck client
+ * repeating the request cannot push a class a year into the future.
+ */
+const actionSchema = z.object({
+  action: z.enum(["start", "end", "extend"]),
+  minutes: z.number().int().min(-120).max(120).optional(),
+});
 
 /** Coach starts or ends the live class. Starting notifies enrolled students. */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -204,6 +216,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
     await writeAuditLog({ action: "class.room.start", userId: payload.userId, metadata: { classId: id }, request });
     return NextResponse.json({ success: true, status: "ONGOING" });
+  }
+
+  if (parsed.data.action === "extend") {
+    const minutes = parsed.data.minutes ?? 15;
+
+    // Read-then-write rather than a raw interval so the new time can be validated: a
+    // class must not be shortened to before it started, which would make it instantly
+    // "over" and end itself the moment the coach pressed the button.
+    const current = await db.class.findUnique({ where: { id }, select: { startsAt: true, endsAt: true } });
+    if (!current) {
+      return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
+    }
+
+    const proposed = new Date(current.endsAt.getTime() + minutes * 60_000);
+    const floor = new Date(Math.max(current.startsAt.getTime(), Date.now()) + 60_000);
+    const endsAt = proposed < floor ? floor : proposed;
+
+    await db.class.update({ where: { id }, data: { endsAt } });
+    await writeAuditLog({
+      action: "class.room.extend",
+      userId: payload.userId,
+      metadata: { classId: id, minutes, endsAt: endsAt.toISOString() },
+      request,
+    });
+    return NextResponse.json({ success: true, endsAt });
   }
 
   await db.class.update({ where: { id }, data: { status: "COMPLETED" } });
