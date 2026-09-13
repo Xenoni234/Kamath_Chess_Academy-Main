@@ -78,7 +78,10 @@ export default function ScheduleClient({ role }: { role: string }) {
     ];
     if (isManager) {
       requests.push(
-        fetchWithAuth("/api/users?role=COACH").then((r) => r.json()),
+        // COACH and HEAD: the academy owner teaches too, and every batch/class route
+        // already accepts HEAD as the coach. Leaving HEAD out of the dropdown meant the
+        // one person who could do anything could not be assigned to anything.
+        fetchWithAuth("/api/users?role=COACH,HEAD").then((r) => r.json()),
         fetchWithAuth("/api/users?role=STUDENT").then((r) => r.json()),
       );
     }
@@ -221,7 +224,10 @@ export default function ScheduleClient({ role }: { role: string }) {
             <select className={selectClass} value={newCoach} onChange={(e) => setNewCoach(e.target.value)}>
               <option value="">Unassigned</option>
               {coaches.map((c) => (
-                <option key={c.id} value={c.id}>{c.username}</option>
+                <option key={c.id} value={c.id}>
+                      {c.username}
+                      {c.role === "HEAD" ? " (head)" : ""}
+                    </option>
               ))}
             </select>
           </div>
@@ -260,7 +266,10 @@ export default function ScheduleClient({ role }: { role: string }) {
                   <select className={selectClass} value={batch.coach?.userId ?? ""} onChange={(e) => assignCoach(batch.id, e.target.value)}>
                     <option value="">Unassigned</option>
                     {coaches.map((c) => (
-                      <option key={c.id} value={c.id}>{c.username}</option>
+                      <option key={c.id} value={c.id}>
+                      {c.username}
+                      {c.role === "HEAD" ? " (head)" : ""}
+                    </option>
                     ))}
                   </select>
                 </div>
@@ -334,7 +343,10 @@ export default function ScheduleClient({ role }: { role: string }) {
                 <select className={selectClass} value={clsCoach} onChange={(e) => setClsCoach(e.target.value)}>
                   <option value="">Use batch coach</option>
                   {coaches.map((c) => (
-                    <option key={c.id} value={c.id}>{c.username}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.username}
+                      {c.role === "HEAD" ? " (head)" : ""}
+                    </option>
                   ))}
                 </select>
               </div>
