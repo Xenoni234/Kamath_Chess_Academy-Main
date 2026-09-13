@@ -10,22 +10,20 @@ export const metadata = {
  *
  * Written because the site's footer already advertised a "Refund Policy" that did
  * not exist, and because a payment gateway will not activate a merchant account
- * without one that states a specific refund window. The terms below are a
- * reasonable default for a coaching academy — they are NOT the academy's decided
- * policy, which is why the draft banner is the first thing on the page.
+ * without one that states a specific refund window.
+ *
+ * ADOPTED 14 September 2026 on the academy owner's instruction. It carried a DRAFT
+ * banner until then. These are now the academy's stated terms, which means changing
+ * them changes what customers were told at the time they paid — so edit the text and
+ * bump `updated` together, and keep the old wording in git history.
  */
 export default function RefundPage() {
   return (
     <LegalDoc
       title="Refund & Cancellation Policy"
-      updated="September 2026"
+      updated="14 September 2026"
       intro="How fees, cancellations and refunds work at Kamath Chess Academy."
     >
-      <p className="rounded-lg border border-kca-warning/40 bg-kca-surface-2 p-4 text-sm text-kca-warning">
-        <strong>DRAFT — not yet approved by the academy.</strong> These terms are a starting point and have not been
-        reviewed. Please replace or confirm them before relying on this page.
-      </p>
-
       <Clause heading="1. Scope">
         <p>
           This policy covers fees paid to Kamath Chess Academy for coaching programmes, class batches and tournament
