@@ -197,11 +197,44 @@ volumes:
 
 **`Caddyfile`** (automatic HTTPS + WebSocket-aware reverse proxy; it passes the app's COOP/COEP
 headers straight through):
+The committed copy is [`deploy/Caddyfile`](deploy/Caddyfile) — keep them in step, because a
+rebuilt server loses anything that only ever existed on the server.
+
 ```
 kamathchessacademy.com, www.kamathchessacademy.com {
     encode gzip
+
+    # Access log — what scripts/visitors.py counts. Rolled so it cannot fill the disk,
+    # and kept 14 days because IP addresses are personal data under the DPDPA.
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 20MiB
+            roll_keep 5
+            roll_keep_for 336h
+        }
+        format json
+    }
+
     reverse_proxy app:3000
 }
+```
+
+The `caddy` service needs somewhere to put that file — add a volume alongside the
+existing two:
+
+```yaml
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy      # <- add this
+```
+
+and declare it at the bottom with the others:
+
+```yaml
+volumes:
+  caddy-logs:
 ```
 
 **`.env.production`** — see [§6](#6-environment-variables).

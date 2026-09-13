@@ -1,5 +1,6 @@
 import HeroSection from "@/components/public/HeroSection";
 import AchievementsSection from "@/components/public/AchievementsSection";
+import CoachesSection from "@/components/public/CoachesSection";
 import TournamentSchedule from "@/components/public/TournamentSchedule";
 import AboutSection from "@/components/public/AboutSection";
 import ContactSection from "@/components/public/ContactSection";
@@ -12,6 +13,9 @@ export default function HomePage() {
 
       {/* 2. ACHIEVEMENTS SECTION (id="achievements" is inside the component) */}
       <AchievementsSection />
+
+      {/* Renders nothing until the owner adds coaches — see CoachesSection. */}
+      <CoachesSection />
 
       {/* 3. TOURNAMENT SCHEDULE SECTION (id="schedule" is inside the component) */}
       <TournamentSchedule />

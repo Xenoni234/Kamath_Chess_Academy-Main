@@ -58,7 +58,7 @@ export default function TournamentSchedule() {
         <div className="mb-16 text-center">
           <h2 className="section-heading">Upcoming Tournaments</h2>
           <p className="section-subheading mt-4 mx-auto">
-            Test your limits and gain FIDE/Lichess rating points in our structured, competitive academy tournaments.
+            Test your limits in our structured, competitive academy tournaments.
           </p>
         </div>
 

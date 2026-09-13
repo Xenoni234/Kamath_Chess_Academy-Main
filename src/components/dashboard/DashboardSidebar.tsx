@@ -11,6 +11,7 @@ import {
   CalendarDays,
   CalendarPlus,
   FileText,
+  Globe,
   GraduationCap,
   History,
   Home,
@@ -139,6 +140,7 @@ export default function DashboardSidebar({ username, role }: { username: string;
     { href: "/dashboard/admin/users", label: "People", icon: UserCog, roles: ["HR", "HEAD"] },
     { href: "/dashboard/admin/payments", label: "Fees", icon: IndianRupee, roles: ["HEAD"] },
     { href: "/dashboard/admin/contact", label: "Enquiries", icon: Inbox, roles: ["HR", "HEAD"] },
+    { href: "/dashboard/admin/website", label: "Website", icon: Globe, roles: ["HEAD"] },
     { href: "/dashboard/admin/invite-codes", label: "Invite codes", icon: KeyRound, roles: ["HEAD"] },
     { href: "/dashboard/admin/audit", label: "Audit log", icon: History, roles: ["HEAD"] },
   ];
