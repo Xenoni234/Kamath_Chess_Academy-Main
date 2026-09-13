@@ -24,6 +24,17 @@ export const tournamentWatchSchema = z.object({ tournamentId: z.string() });
 /** Join/leave a live class room (Phase 6 v1). */
 export const classJoinSchema = z.object({ classId: z.string().min(1) });
 
+/**
+ * A chat message between the two players of a game.
+ *
+ * Kept short deliberately. This is a chat between two children mid-game, not a
+ * discussion forum, and a shorter cap is one fewer way for it to be misused.
+ */
+export const gameMessageSchema = z.object({
+  gameId: z.string().min(1),
+  body: z.string().trim().min(1).max(300),
+});
+
 /** An in-class chat message. */
 export const classMessageSchema = z.object({
   classId: z.string().min(1),

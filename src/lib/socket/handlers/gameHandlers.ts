@@ -9,7 +9,7 @@ import {
   validateMove,
   type GameState,
 } from "../gameEngine.ts";
-import { gameIdSchema, gameMoveSchema } from "../../validations/socket.ts";
+import { gameIdSchema, gameMessageSchema, gameMoveSchema } from "../../validations/socket.ts";
 
 function room(gameId: string) {
   return `game:${gameId}`;
@@ -199,6 +199,36 @@ export function setupGameHandlers(io: Server, socket: Socket) {
       },
       io,
     );
+  });
+
+  /**
+   * Chat between the two players.
+   *
+   * NOT persisted, and that is the decision rather than an omission: these are messages
+   * between children, the academy has no moderation tooling, and a durable record of them
+   * is a DPDPA liability nobody asked for. It lives as long as the game is on screen.
+   *
+   * Spectators may read (they are in the room) but NOT send — `isPlayer` is checked here,
+   * not just room membership, because anyone can spectate a public game and the two people
+   * playing should not be shouted at by strangers.
+   */
+  socket.on("game:chat", async (rawPayload: unknown) => {
+    const parsed = gameMessageSchema.safeParse(rawPayload);
+    if (!parsed.success) return;
+    const { gameId, body } = parsed.data;
+
+    const game = await getGameFromRedis(gameId);
+    const userId = socket.data.userId as string;
+    if (!game || !isPlayer(game, userId)) return;
+    if (!socket.rooms.has(room(gameId))) return;
+
+    io.to(room(gameId)).emit("game:chat", {
+      id: `${Date.now()}-${userId}`,
+      userId,
+      username: (socket.data.username as string) ?? "player",
+      body,
+      at: Date.now(),
+    });
   });
 
   socket.on("game:resign", async (rawPayload: unknown) => {
