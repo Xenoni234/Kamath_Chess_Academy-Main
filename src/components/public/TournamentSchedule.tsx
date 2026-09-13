@@ -52,7 +52,7 @@ export default function TournamentSchedule() {
   if (!loaded || tournaments.length === 0) return null;
 
   return (
-    <section id="schedule" className="bg-[#050505] py-20 px-6 md:px-8 relative overflow-hidden">
+    <section id="schedule" className="bg-kca-black py-20 px-6 md:px-8 relative overflow-hidden">
       <div className="mx-auto max-w-5xl relative z-10">
         {/* Section Headers */}
         <div className="mb-16 text-center">

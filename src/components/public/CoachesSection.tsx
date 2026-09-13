@@ -96,7 +96,7 @@ export default function CoachesSection() {
   const duration = `${Math.max(24, coaches.length * 7)}s`;
 
   return (
-    <section id="coaches" className="relative overflow-hidden bg-[#050505] px-6 py-20 md:px-8">
+    <section id="coaches" className="relative overflow-hidden bg-kca-black px-6 py-20 md:px-8">
       <div
         className="pointer-events-none absolute left-0 top-0 h-96 w-96"
         style={{ backgroundImage: "radial-gradient(circle, rgba(0, 200, 232, 0.05) 0%, transparent 70%)" }}
