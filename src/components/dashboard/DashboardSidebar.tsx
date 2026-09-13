@@ -14,17 +14,18 @@ import {
   GraduationCap,
   History,
   Home,
-  KeyRound,
-  IndianRupee,
   Inbox,
+  IndianRupee,
+  KeyRound,
   LogOut,
   Map,
-  Menu,
   Medal,
+  Menu,
   Puzzle,
   Swords,
   Trophy,
   UserCog,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -99,6 +100,9 @@ export default function DashboardSidebar({ username, role }: { username: string;
   // shown a rated-game lobby and a puzzle trainer, and HR saw "Play vs Human" —
   // the nav described a student product regardless of who was signed in.
   const navItems: NavItem[] = [
+    // Above Overview and with no `roles`, so every role has it. Everybody has a password
+    // and, before this, nobody had a way to change it without asking staff.
+    { href: "/dashboard/profile", label: "My Profile", icon: UserRound },
     { href: `/dashboard/${roleLower}`, label: "Overview", icon: Home },
 
     // --- Training (students; coaches keep it to demonstrate and prepare) ---
