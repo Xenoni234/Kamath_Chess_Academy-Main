@@ -29,6 +29,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "user.password.change": "Password changed",
   "invite.delete": "Invite code removed",
   "admin.games.read": "Games list viewed",
+  "tournament.register": "Entered a tournament",
+  "tournament.registrations.read": "Tournament entry list viewed",
   "admin.user.create": "Staff created an account",
   "admin.user.update": "Account role or status changed",
   "admin.parentLink.create": "Parent linked to child",

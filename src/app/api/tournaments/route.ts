@@ -76,9 +76,39 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    const { title, description, type, startsAt } = parsed.data;
+    const {
+      title,
+      description,
+      type,
+      startsAt,
+      publicListed,
+      isOffline,
+      prizePool,
+      formatNote,
+      venue,
+      entryFee,
+      contactInfo,
+    } = parsed.data;
+
+    // Empty strings become null so an unfilled field is absent rather than blank — the
+    // public card only renders a prize pool when one actually exists, and "" would
+    // print an empty "Prize Pool:" label.
+    const orNull = (value: string | undefined) => (value ? value : null);
     const tournament = await db.tournament.create({
-      data: { title, description, type, startsAt: new Date(startsAt), status: "UPCOMING" },
+      data: {
+        title,
+        description,
+        type,
+        startsAt: new Date(startsAt),
+        status: "UPCOMING",
+        publicListed: publicListed ?? false,
+        isOffline: isOffline ?? false,
+        prizePool: orNull(prizePool),
+        formatNote: orNull(formatNote),
+        venue: orNull(venue),
+        entryFee: orNull(entryFee),
+        contactInfo: orNull(contactInfo),
+      },
     });
     return NextResponse.json({ success: true, tournament });
   } catch (error) {

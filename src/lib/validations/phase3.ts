@@ -78,4 +78,20 @@ export const createTournamentSchema = z.object({
   description: z.string().max(500).optional(),
   type: z.enum(["ARENA", "SWISS", "ROUND_ROBIN"]),
   startsAt: dateString,
+
+  /**
+   * Public promotion. All optional, all off by default — a tournament run on the platform
+   * for six students is not a marketing item, and appearing on the academy's front page
+   * should be a decision rather than a side effect of creating one.
+   */
+  publicListed: z.boolean().optional(),
+  isOffline: z.boolean().optional(),
+  /** Free text: "Scholarships & Trophies" is a real prize and a number cannot hold it. */
+  prizePool: z.string().max(80).optional().or(z.literal("")),
+  formatNote: z.string().max(80).optional().or(z.literal("")),
+
+  // Shown only to signed-in users — the public endpoint never selects these.
+  venue: z.string().max(200).optional().or(z.literal("")),
+  entryFee: z.string().max(80).optional().or(z.literal("")),
+  contactInfo: z.string().max(200).optional().or(z.literal("")),
 });

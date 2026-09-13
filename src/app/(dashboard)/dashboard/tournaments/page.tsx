@@ -33,6 +33,23 @@ export default function TournamentsPage() {
   const [type, setType] = useState<"ARENA" | "SWISS" | "ROUND_ROBIN">("SWISS");
   const [startsAt, setStartsAt] = useState("");
 
+  /**
+   * Public promotion, collapsed by default.
+   *
+   * Most tournaments here are internal — a Sunday arena for the batch — and should not
+   * appear on the academy's front page. Opening this panel is the decision to advertise;
+   * leaving it shut keeps the common case a three-field form.
+   */
+  const [promote, setPromote] = useState(false);
+  const [pub, setPub] = useState({
+    isOffline: false,
+    prizePool: "",
+    formatNote: "",
+    venue: "",
+    entryFee: "",
+    contactInfo: "",
+  });
+
   async function reload() {
     const res = await fetchWithAuth("/api/tournaments");
     const data = await res.json();
@@ -61,11 +78,13 @@ export default function TournamentsPage() {
       const res = await fetchWithAuth("/api/tournaments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, type, startsAt }),
+        body: JSON.stringify({ title, type, startsAt, publicListed: promote, ...pub }),
       });
       if (res.ok) {
         setTitle("");
         setStartsAt("");
+        setPromote(false);
+        setPub({ isOffline: false, prizePool: "", formatNote: "", venue: "", entryFee: "", contactInfo: "" });
         setShowForm(false);
         await reload();
       }
@@ -106,6 +125,94 @@ export default function TournamentsPage() {
             <label className="block text-xs font-semibold uppercase tracking-wider text-kca-gray-400 mb-1.5">Starts</label>
             <input type="datetime-local" className="input-field py-2 text-sm" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} required />
           </div>
+          {/* --- Public promotion ------------------------------------------------ */}
+          <div className="md:col-span-4 border-t border-kca-border pt-4">
+            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-kca-gray-100">
+              <input
+                type="checkbox"
+                checked={promote}
+                onChange={(e) => setPromote(e.target.checked)}
+                className="h-4 w-4 accent-kca-cyan"
+              />
+              Advertise this on the public homepage
+            </label>
+
+            {promote && (
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <label className="flex items-center gap-2.5 text-sm text-kca-gray-100 md:col-span-3">
+                  <input
+                    type="checkbox"
+                    checked={pub.isOffline}
+                    onChange={(e) => setPub((v) => ({ ...v, isOffline: e.target.checked }))}
+                    className="h-4 w-4 accent-kca-cyan"
+                  />
+                  This is an over-the-board event, not played on the site
+                </label>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                    Format shown publicly
+                  </label>
+                  <input
+                    className="input-field py-2 text-sm"
+                    value={pub.formatNote}
+                    onChange={(e) => setPub((v) => ({ ...v, formatNote: e.target.value }))}
+                    placeholder="9 Rounds Swiss · Blitz 3+2"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                    Prize pool
+                  </label>
+                  <input
+                    className="input-field py-2 text-sm"
+                    value={pub.prizePool}
+                    onChange={(e) => setPub((v) => ({ ...v, prizePool: e.target.value }))}
+                    placeholder="Leave blank if there is none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                    Entry fee
+                  </label>
+                  <input
+                    className="input-field py-2 text-sm"
+                    value={pub.entryFee}
+                    onChange={(e) => setPub((v) => ({ ...v, entryFee: e.target.value }))}
+                    placeholder="₹500"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                    Venue
+                  </label>
+                  <input
+                    className="input-field py-2 text-sm"
+                    value={pub.venue}
+                    onChange={(e) => setPub((v) => ({ ...v, venue: e.target.value }))}
+                    placeholder="Hall name, area, city"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-kca-gray-400">
+                    Contact
+                  </label>
+                  <input
+                    className="input-field py-2 text-sm"
+                    value={pub.contactInfo}
+                    onChange={(e) => setPub((v) => ({ ...v, contactInfo: e.target.value }))}
+                    placeholder="Phone or email"
+                  />
+                </div>
+
+                <p className="md:col-span-3 text-xs text-kca-gray-400">
+                  The homepage shows only the title, date, format and prize. Venue, entry fee and
+                  contact are sent only to signed-in users — visitors see “Sign in for details”.
+                </p>
+              </div>
+            )}
+          </div>
+
           <button type="submit" disabled={creating} className="btn-primary py-2.5 md:col-span-4 disabled:opacity-50">
             {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create tournament"}
           </button>

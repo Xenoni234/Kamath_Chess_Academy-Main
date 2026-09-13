@@ -126,6 +126,7 @@ model User {
   recordedPayments Payment[]         @relation("PaymentRecorder")
   gameAnnotations  GameAnnotation[]  @relation("GameAnnotations")
   invitesCreated   InviteCode[]      @relation("InviteCodesCreated")
+  tournamentRegistrations TournamentRegistration[]
   inviteUsed       InviteCode?       @relation("InviteCodeUsed")
 
   /// DPDPA consent, stored as timestamps rather than booleans: a boolean cannot
@@ -391,9 +392,31 @@ model Tournament {
   status      TournamentStatus   @default(UPCOMING)
   startsAt    DateTime
   endsAt      DateTime?
+
+  /// Advertise this on the PUBLIC homepage. Off by default: a tournament run on the
+  /// platform for six students is not a marketing item, and opting in should be a
+  /// decision rather than the consequence of creating one.
+  publicListed Boolean           @default(false)
+  /// An over-the-board event the academy is promoting, as opposed to one played here.
+  /// Offline events have a venue and an entry fee; online ones do not.
+  isOffline   Boolean            @default(false)
+  /// Free text, because a prize is not always money — "Scholarships & Trophies" is a
+  /// real answer and a Decimal cannot hold it.
+  prizePool   String?
+  /// "9 Rounds Swiss · Blitz 3+2" — how the event is played, for the public card.
+  formatNote  String?
+
+  /// Everything below is shown only to SIGNED-IN users. The public endpoint does not
+  /// select these columns at all, so "log in for details" is enforced by what the
+  /// server sends rather than by what the page chooses to render.
+  venue       String?
+  entryFee    String?
+  contactInfo String?
+
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   players     TournamentPlayer[]
+  registrations TournamentRegistration[]
 
   @@index([status, startsAt])
 }
@@ -860,4 +883,52 @@ model InviteCode {
   @@index([usedAt, createdAt])
   @@index([role])
   @@map("invite_codes")
+}
+
+/**
+ * An entry form for an over-the-board tournament.
+ *
+ * Separate from `TournamentPlayer`, which is the pairing/standings record for an event
+ * played ON the platform. This is the "I would like to come" form for an offline event:
+ * the academy needs a name, a contact number and an age to seat someone in a hall, and
+ * none of that belongs in a Glicko standings table.
+ *
+ * Sign-in is required (`userId` is not nullable). That is a DPDPA decision as much as a
+ * product one: a registered account has already given the three mandatory consents, so
+ * collecting a child's date of birth and phone number against it is covered. A public
+ * form open to anyone would be collecting a minor's personal data with no consent record
+ * at all.
+ *
+ * `@@unique([tournamentId, userId])` so a double-tap on Register does not produce two
+ * entries — the second write fails rather than quietly duplicating a child in the list.
+ */
+model TournamentRegistration {
+  id           String     @id @default(cuid())
+  tournamentId String
+  userId       String
+
+  /// As it should appear on the pairing sheet — not necessarily the account's username.
+  fullName     String
+  /// Age brackets decide sections in junior events.
+  dateOfBirth  DateTime?
+  phone        String
+  /// Free text: a player may quote a FIDE, Lichess or Chess.com rating, or none.
+  rating       String?
+  fideId       String?
+  /// Anything the organiser should know — dietary needs, arriving late, a guardian's name.
+  notes        String?
+
+  /// PENDING until staff confirm a place. Not an enum: an academy's own workflow words
+  /// change, and a migration to add "WAITLIST" is not worth the ceremony.
+  status       String     @default("PENDING")
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId, status])
+  @@map("tournament_registrations")
 }
