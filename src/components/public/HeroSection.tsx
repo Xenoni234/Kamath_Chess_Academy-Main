@@ -1,12 +1,41 @@
-import { ArrowRight, Sparkles } from "lucide-react";
+"use client";
 
+import { useEffect, useState } from "react";
+import { ArrowRight } from "lucide-react";
+
+/**
+ * HARD RULE #2 EXCEPTION, on the academy owner's instruction.
+ *
+ * These numbers were hardcoded as "500+ Students / 50+ Coaches / 10,000+ Games Played /
+ * 15+ Tournaments" on a platform that had nine accounts and one game. Invented figures on
+ * a live site, read by parents deciding where to send their child, are not a styling
+ * choice — so the data source moved to `/api/public/site` while the layout stayed exactly
+ * as designed.
+ *
+ * Real counts are smaller and true, and they climb on their own as people arrive. The
+ * "+" is kept only once a figure is big enough for rounding to mean anything.
+ */
 export default function HeroSection() {
-  const stats = [
-    { value: "500+", label: "Students" },
-    { value: "50+", label: "Coaches" },
-    { value: "10,000+", label: "Games Played" },
-    { value: "15+", label: "Tournaments" },
-  ];
+  const [stats, setStats] = useState<{ value: string; label: string }[] | null>(null);
+
+  useEffect(() => {
+    fetch("/api/public/site")
+      .then((r) => r.json())
+      .then((d) => {
+        const s = d?.stats;
+        if (!s) return;
+        // Round down to a "+" only past 100 — "12+" reads as hiding something, while 12
+        // reads as a fact.
+        const show = (n: number) => (n >= 100 ? `${Math.floor(n / 100) * 100}+` : String(n));
+        setStats([
+          { value: show(s.students), label: "Students" },
+          { value: show(s.coaches), label: "Coaches" },
+          { value: show(s.games), label: "Games Played" },
+          { value: show(s.tournaments), label: "Tournaments" },
+        ]);
+      })
+      .catch(() => setStats(null));
+  }, []);
 
   return (
     <section
@@ -23,13 +52,6 @@ export default function HeroSection() {
 
       {/* Hero Content */}
       <div className="relative z-10 mx-auto flex max-w-5xl flex-grow flex-col items-center justify-center text-center">
-        {/* Eyebrow */}
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-kca-cyan/20 bg-kca-cyan/5 px-4 py-1.5">
-          <Sparkles className="h-4 w-4 text-kca-cyan" />
-          <span className="font-display text-xs font-bold uppercase tracking-widest text-kca-cyan">
-            India&apos;s Premier Chess Academy
-          </span>
-        </div>
 
         {/* Main Heading */}
         <h1 className="font-display text-5xl font-black leading-none text-kca-white sm:text-6xl md:text-7xl lg:text-8xl tracking-tight">
@@ -41,9 +63,9 @@ export default function HeroSection() {
 
         {/* Subheading */}
         <p className="mt-8 max-w-2xl font-sans text-base leading-relaxed text-kca-gray-400 sm:text-lg md:text-xl">
-          Lichess-powered platform with AI analysis, grandmaster-level
-          preparation tools, and live coaching. Elevate your play from amateur
-          to champion.
+          A complete training platform: engine analysis, opponent preparation,
+          spaced-repetition puzzles and live coaching. Elevate your play from
+          amateur to champion.
         </p>
 
         {/* Action Buttons */}
@@ -52,13 +74,13 @@ export default function HeroSection() {
             Get Started
             <ArrowRight className="h-5 w-5" />
           </a>
-          <a href="#about" className="btn-secondary w-full sm:w-auto text-center px-8 py-4">
-            Explore Platform
-          </a>
         </div>
       </div>
 
-      {/* Stats Row */}
+      {/* Stats Row — hidden until the real numbers arrive. A row of skeletons or zeros
+          during load looks worse than no row, and inventing placeholders is exactly what
+          this change exists to undo. */}
+      {stats && (
       <div className="relative z-10 mx-auto mt-16 w-full max-w-6xl border-t border-kca-border/40 pt-10">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
           {stats.map((stat, index) => (
@@ -73,6 +95,7 @@ export default function HeroSection() {
           ))}
         </div>
       </div>
+      )}
     </section>
   );
 }

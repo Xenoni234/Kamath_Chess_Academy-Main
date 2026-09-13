@@ -1,0 +1,29 @@
+# Caddy config for kamathchessacademy.com
+#
+# Lives here so it is version-controlled rather than existing only on the server, where a
+# rebuilt box would lose it. Copy to /opt/kca/Caddyfile and `docker compose restart caddy`.
+
+kamathchessacademy.com, www.kamathchessacademy.com {
+    encode gzip
+
+    # Access log, for counting visitors without adding an analytics service.
+    #
+    # A self-hosted Plausible or Umami would be nicer, but it is another container on a
+    # 2-vCPU box that has already fallen over once under memory pressure. Caddy is
+    # already in the request path and already knows everything needed.
+    #
+    # JSON because it is unambiguous to parse; rolled so it cannot fill the disk. 14 days
+    # is enough to answer "how did last week go" and short enough that IP addresses — which
+    # ARE personal data under the DPDPA — are not kept indefinitely. scripts/visitors.py
+    # hashes them on read and never writes a raw address anywhere.
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 20MiB
+            roll_keep 5
+            roll_keep_for 336h
+        }
+        format json
+    }
+
+    reverse_proxy app:3000
+}

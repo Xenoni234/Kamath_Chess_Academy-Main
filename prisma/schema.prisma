@@ -932,3 +932,66 @@ model TournamentRegistration {
   @@index([tournamentId, status])
   @@map("tournament_registrations")
 }
+
+/**
+ * Content the academy owner edits on the public website — the "Our Champions" cards and
+ * the coaching team.
+ *
+ * These used to be arrays hardcoded in the React components, which meant the site
+ * advertised six titled players as "our elite academy students" and a "₹1,00,000 prize
+ * pool" for a tournament that did not exist. Content that makes claims about real people
+ * belongs in the database where the person responsible for it can change it, not in a
+ * component only a developer can edit.
+ *
+ * Photos are `Bytes` on the row, like GameReport.pdf and the others. Cloudinary's env vars
+ * exist in .env.example but nothing has ever used them, and adding an image service for a
+ * handful of headshots would be a new dependency for no gain. `photoType` carries the MIME
+ * so the serving route does not have to guess.
+ */
+model SiteAchievement {
+  id           String   @id @default(cuid())
+  /// The student's name as it should appear publicly.
+  name         String
+  /// What they did — "Won Gold at the Asian Continental Women Championship".
+  achievement  String
+  achievedOn   DateTime
+  photo        Bytes?
+  photoType    String?
+  /// Lowest first. Lets the owner put the newest or proudest result at the top without
+  /// depending on the date.
+  displayOrder Int      @default(0)
+  /// Unpublished rows stay in the admin list but never reach the public endpoint, so a
+  /// half-written entry is not a live claim.
+  published    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([published, displayOrder])
+  @@map("site_achievements")
+}
+
+/**
+ * A coach on the public "our team" section.
+ *
+ * Deliberately NOT the `CoachProfile` of a `User`. A coach can be introduced on the website
+ * before they have a login, and a staff account can exist without being advertised — the
+ * two lists are related but not the same, and forcing them together would mean creating an
+ * account to put a face on a page.
+ */
+model SiteCoach {
+  id           String   @id @default(cuid())
+  name         String
+  /// Free text — "FIDE Instructor", "National Arbiter", or simply "Coach". The academy is
+  /// responsible for the accuracy of anything it puts here.
+  title        String?
+  bio          String?
+  photo        Bytes?
+  photoType    String?
+  displayOrder Int      @default(0)
+  published    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([published, displayOrder])
+  @@map("site_coaches")
+}

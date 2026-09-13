@@ -29,6 +29,19 @@
 }
 
 :root[data-theme="light"] {
+  /*
+   * Light-mode text, darkened for contrast.
+   *
+   * MEASURED against WCAG AA, which asks 4.5:1 for body text. The previous values put
+   * gray-500 at 3.53:1 and gray-600 at 2.34:1 on the page background — both failing, and
+   * both used for real prose rather than decoration. Body copy on the public site looked
+   * washed out on a bright screen, which is where most parents will read it.
+   *
+   * Now: gray-400 8.06:1, gray-500 5.47:1, gray-600 3.74:1. Only gray-600 remains below
+   * the body threshold; it is for large text and faint dividers, never paragraphs.
+   * Dark mode is untouched — it was never the problem.
+   */
+
   --kca-black: #F2F3F5;      /* page background */
   --kca-surface: #FFFFFF;    /* cards / surfaces */
   --kca-surface-2: #EBECEF;  /* elevated / hover */
@@ -39,11 +52,11 @@
   --kca-cyan-bright: #06B6D4;
   --kca-cyan-dim: #0E7490;
   --kca-white: #0B0D10;      /* primary text (highest contrast) */
-  --kca-gray-100: #33383F;   /* secondary text */
-  --kca-gray-300: #474D55;   /* between secondary and muted */
-  --kca-gray-400: #5B616B;   /* muted text */
-  --kca-gray-500: #7B818B;   /* between muted and faint */
-  --kca-gray-600: #9BA1AB;   /* faint text / placeholders */
+  --kca-gray-100: #1C2027;   /* secondary text */
+  --kca-gray-300: #2E343C;   /* between secondary and muted */
+  --kca-gray-400: #434A54;   /* muted text */
+  --kca-gray-500: #5C636D;   /* between muted and faint */
+  --kca-gray-600: #767D87;   /* faint text / placeholders */
   --kca-success: #15A34A;
   --kca-warning: #B45309;
   --kca-danger: #DC2626;
@@ -146,3 +159,43 @@ body.game-page-active main {
   min-height: 100vh !important;
 }
 
+/*
+ * Marquee for the public "Our Coaches" and "Our Champions" strips.
+ *
+ * The content is rendered TWICE inside the track and the track slides exactly -50%, so the
+ * second copy is in the first's place at the moment it resets — a seamless loop with no
+ * JavaScript measuring anything. It follows that both copies must be identical and
+ * `aria-hidden` must be on the duplicate, or a screen reader reads every name twice.
+ *
+ * Duration scales with the number of items via a CSS variable, so five coaches and fifty
+ * move at the same visual speed instead of fifty becoming a blur.
+ */
+@keyframes kca-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.kca-marquee {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
+          mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
+}
+
+.kca-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: kca-marquee var(--kca-marquee-duration, 40s) linear infinite;
+}
+
+/* Reading a card is impossible while it slides away. Hovering stops it. */
+.kca-marquee:hover .kca-marquee-track { animation-play-state: paused; }
+
+/*
+ * Motion can trigger nausea and migraine, and this is a site used by children. When the
+ * operating system asks for reduced motion, the strip becomes an ordinary horizontal
+ * scroller that the reader controls.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .kca-marquee { overflow-x: auto; }
+  .kca-marquee-track { animation: none; width: auto; }
+}

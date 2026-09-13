@@ -62,6 +62,20 @@ export const metadata: Metadata = {
     follow: true,
     googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
   },
+  /**
+   * Google Search Console site verification.
+   *
+   * Driven by an env var so proving ownership is a deploy-time setting rather than a code
+   * change — and so the token, which is specific to one Google account, is not committed.
+   * Omitted entirely when unset: an empty `<meta content="">` is worse than no tag,
+   * because Google reads it as a failed verification rather than an absent one.
+   *
+   * The DNS TXT method at the domain registrar avoids this tag altogether and is usually
+   * easier; this exists for when the HTML-tag method is the one offered.
+   */
+  ...(process.env.GOOGLE_SITE_VERIFICATION
+    ? { verification: { google: process.env.GOOGLE_SITE_VERIFICATION } }
+    : {}),
 };
 
 export default function RootLayout({

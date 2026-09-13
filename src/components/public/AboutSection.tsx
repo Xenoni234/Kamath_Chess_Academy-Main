@@ -2,7 +2,7 @@ import { CheckCircle2 } from "lucide-react";
 
 export default function AboutSection() {
   const features = [
-    "Lichess-style live multiplayer",
+    "Live multiplayer with server-side move validation",
     "AI-powered opening preparation",
     "Digital Second opponent analysis",
     "Inbuilt video classes",
@@ -21,10 +21,10 @@ export default function AboutSection() {
             
             <div className="mt-8 space-y-6 font-sans text-base leading-relaxed text-kca-gray-400">
               <p>
-                Founded by Grandmaster mentors, Kamath Chess Academy (KCA) represents a paradigm shift in modern chess training. We combine the time-tested methodologies of classical Soviet chess preparation with a cutting-edge, proprietary digital platform to forge the next generation of competitive minds.
+                Kamath Chess Academy (KCA) represents a paradigm shift in modern chess training. We combine the time-tested methodologies of classical Soviet chess preparation with a cutting-edge, proprietary digital platform to forge the next generation of competitive minds.
               </p>
               <p>
-                Whether you are a novice learning the rules or an advanced tournament player seeking international norms, KCA provides an ecosystem designed for rapid growth. Our platform integrates seamlessly with Lichess, offering real-time live match analysis, grandmaster-curated database training, and direct mentorship from titled coaches.
+                Whether you are a novice learning the rules or an advanced tournament player seeking international norms, KCA provides an ecosystem designed for rapid growth. Our platform offers real-time match analysis, a half-million-position tactics library with spaced repetition, opponent preparation built from real games, and direct mentorship from our coaches.
               </p>
             </div>
           </div>

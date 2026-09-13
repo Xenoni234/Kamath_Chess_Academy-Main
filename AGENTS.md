@@ -570,6 +570,55 @@ audit-log viewer, and the role context provider. Razorpay is built and gated beh
 
 ### Things that must not be undone
 
+- **The side to move is read from the FEN, never from `game.turn`.** `turn` used to be a
+  field the server flipped by hand and pushed over the socket, and both the clock and the
+  board's `disabled` prop trusted it. One missed `game:update` and it went stale, so the
+  client ran the WRONG player's clock down to 00:00 on screen while the real on-move
+  player's clock sat frozen — and the server, counting the real clock, flagged the player
+  who appeared to have twelve seconds left. A student lost a blitz game on time while
+  watching their opponent's clock read zero. `turnOf(game)` on the server and
+  `fen.split(" ")[1]` on the client are now the only sources. `scripts/verifyClock.ts`
+  pins it, along with the second bug found there: `max(0, before - elapsed) + increment`
+  erased time debt, so in ANY game with an increment the flag check could never fire.
+- **`requireRole` returns a DENIAL RESPONSE or null — it is NOT a boolean.** Writing
+  `if (!requireRole(...))` inverts it: authorised staff are refused and everyone else walks
+  through. I shipped exactly that in `/api/admin/games` and caught it only by reading the
+  helper. The shape is always `const denied = requireRole(...); if (denied) return denied;`
+  `hasRole` is the boolean variant, for server components.
+- **Authenticated client fetches go through `fetchWithAuth`, not `fetch`.** The access
+  token lives 15 minutes and `SessionKeepAlive` cannot be airtight — browsers throttle
+  timers in background tabs and stop them while the machine sleeps. Any page a student sits
+  on longer than that hit a 401 mid-task; a report polling for a quarter of an hour crossed
+  it almost every time, showing a red "Unauthorized" over a report that was building fine.
+  It refreshes once and retries once, only on 401. **Retrying a POST is safe only because
+  every route authenticates BEFORE touching the database** — if a route is ever written
+  that works first and authenticates second, this retry starts duplicating it.
+- **`/api/public/tournaments` is the only unauthenticated data endpoint, so what it
+  SELECTS is the privacy boundary.** Venue, entry fee and contact details are never read
+  from the database on that path — not fetched and hidden, not sent and ignored by the
+  page. "Sign in for details" is therefore true rather than decorative. Do not add columns
+  to that select for convenience.
+- **The class call iframe is created once and never re-parented.** An iframe reloads when
+  it is moved in the DOM, so carrying a live class into a floating window with
+  `appendChild` would drop the call every time — the same bug the feature exists to fix.
+  `ClassCallHost` keeps one `position: fixed` host above every dashboard page and changes
+  only its CSS box; the room page publishes a rectangle for it to line up with.
+- **Classes need `JAAS_*` or they die after five minutes.** Public `meet.jit.si` hard-
+  disconnects embedded calls — it is a demo, and says so in a banner. `src/lib/media/jaas.ts`
+  mints a per-viewer, per-room RS256 token; without the env vars it returns null and the
+  room falls back to meet.jit.si, which is a downgrade rather than an outage and therefore
+  easy to miss. `scripts/verifyJaas.ts` tells a broken key from an absent one.
+- **`redeploy.sh` builds one image at a time, and re-execs itself after pulling.**
+  `docker compose up --build` builds `app` and `worker` in PARALLEL — two Next.js builds on
+  2 vCPUs beside the live stack. That wedged the server for six minutes (`journald`:
+  "Under memory pressure, flushing caches" until it stopped logging) and it needed a reboot
+  from the hosting panel. Note the kernel never OOM-killed anything, so grepping for the OOM
+  killer finds nothing and proves nothing — on a swapless box, thrashing IS the failure
+  mode. 4 GB of swap now exists. Separately: the script pulls a new copy of ITSELF, and
+  bash reads scripts from a byte offset, so it must re-exec or it finishes running the old
+  version — which is why the fix appeared not to work on the deploy that delivered it.
+
+
 - **`src/lib/pdf/launch.ts` is the only place Chromium may be launched.** All three
   renderers used bare `puppeteer.launch({headless:true})`, and the deployment image
   runs as root, where Chromium's setuid sandbox refuses to start. Every PDF in the
@@ -721,6 +770,12 @@ npx tsx scripts/verifyEvolution.ts                             # style-evolution
 npx tsx scripts/verifyGameState.ts     # a finished game renders as PLAYED, not spectated
 npx tsx scripts/verifyEndCleanly.ts    # a truncated AI answer ends tidily and loses nothing finished
 npx tsx scripts/verifyMarkdownHtml.ts  # the PDFs render markdown instead of printing ** and -
+npx tsx scripts/verifyClock.ts         # the running clock belongs to the player whose move it is
+npx tsx --env-file=.env.production scripts/verifyJaas.ts   # a broken JaaS key vs no key at all
+
+# Housekeeping and operations (run against the real database / server).
+npx tsx --env-file=.env.local scripts/cleanDemoData.ts     # dry run; --yes to apply
+python3 scripts/visitors.py <caddy access.log>             # daily unique visitors, no analytics service
 npx tsx scripts/verifySelfProfile.ts   # the report's self-profile never states a rate without its sample size
 # (The dev-only /api/dev/otb diagnostic route was removed before launch — use
 #  scripts/verifyOtb.ts, which covers the same chain offline and live.)
