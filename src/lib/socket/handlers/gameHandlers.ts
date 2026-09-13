@@ -19,8 +19,26 @@ function isPlayer(game: GameState, userId: string) {
   return game.white === userId || game.black === userId;
 }
 
+/**
+ * Whose move it is, read from the POSITION rather than from `game.turn`.
+ *
+ * `turn` used to be a field the server flipped by hand on every move and pushed over the
+ * socket. A flipped field can drift from the board; a derived one cannot. When it did
+ * drift, the consequences were severe and silent: the client ran the WRONG player's clock
+ * down to 00:00 on screen while the real on-move player's clock sat frozen at a stale
+ * value, and the server — correctly counting the real clock — flagged the player who
+ * appeared to have twelve seconds left. A student lost a game on time while watching
+ * their opponent's clock sit at zero.
+ *
+ * The FEN is produced by chess.js from the move it just validated, so its side-to-move
+ * field cannot disagree with the board. Read it, do not track it.
+ */
+function turnOf(game: Pick<GameState, "fen">): "w" | "b" {
+  return game.fen.split(" ")[1] === "b" ? "b" : "w";
+}
+
 function expectedMover(game: GameState) {
-  return game.turn === "w" ? game.white : game.black;
+  return turnOf(game) === "w" ? game.white : game.black;
 }
 
 function opponent(game: GameState, userId: string) {
@@ -115,7 +133,9 @@ export function setupGameHandlers(io: Server, socket: Socket) {
       fen: validation.newFen,
       pgn: chess.pgn(),
       moves: [...game.moves, `${payload.from}${payload.to}${payload.promotion ?? ""}`],
-      turn: game.turn === "w" ? "b" : "w",
+      // Kept in sync with the FEN rather than flipped, so the stored field and the board
+      // can never disagree. Everything that decides anything reads `turnOf(...)`.
+      turn: validation.newFen.split(" ")[1] === "b" ? "b" : "w",
       lastMoveAt: Date.now(),
     };
 

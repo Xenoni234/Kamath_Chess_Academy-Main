@@ -80,10 +80,22 @@ export default function GameRoomClient({
   const userName = userId === game.white ? initialPlayers.white.username : initialPlayers.black.username;
   const userRating = userId === game.white ? initialPlayers.white.rating : initialPlayers.black.rating;
 
-  // Active status of clocks
+  // Active status of clocks.
+  //
+  // Derived from `fen` — the position actually on the board — and NOT from `game.turn`.
+  // `game.turn` is a field the server flips and pushes; when one `game:update` went
+  // missing it went stale, and the consequence was the worst kind of bug: the wrong
+  // player's clock counted down to 00:00 on screen while the real on-move player's clock
+  // sat frozen at a stale value. The server, counting the real clock, then flagged the
+  // player who appeared to have twelve seconds left. A student lost on time watching
+  // their opponent's clock read zero.
+  //
+  // `fen` is also what the board renders, and it advances optimistically on your own
+  // move, so the running clock can no longer disagree with the pieces in front of you.
   const isOngoing = status === "ongoing";
-  const whiteClockActive = isOngoing && game.turn === "w";
-  const blackClockActive = isOngoing && game.turn === "b";
+  const turn = fen.split(" ")[1] === "b" ? "b" : "w";
+  const whiteClockActive = isOngoing && turn === "w";
+  const blackClockActive = isOngoing && turn === "b";
 
   // Check if abort is allowed (fewer than 2 full moves)
   const canAbort = isPlayer && isOngoing && (!game.moves || game.moves.length < 4);
