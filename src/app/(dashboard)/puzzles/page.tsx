@@ -333,7 +333,7 @@ export default function PuzzlesPage() {
   const disabled = boardLocked || (status !== "solving" && status !== "retrying");
 
   return (
-    <div className="w-full max-w-6xl mx-auto">
+    <div className="w-full max-w-[1600px] mx-auto">
       <EnginePrefetch />
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
@@ -370,7 +370,9 @@ export default function PuzzlesPage() {
 
       <div className="flex flex-col lg:flex-row gap-6 items-start">
         {/* Board */}
-        <div className="w-full max-w-[560px] mx-auto lg:mx-0">
+        {/* Grows with the screen instead of stopping at 560px. A puzzle is a board you
+            stare at; on a large display there is no reason to keep it postcard-sized. */}
+        <div className="w-full max-w-[min(78vh,720px)] mx-auto lg:mx-0">
           <div
             className={cn(
               "aspect-square w-full bg-kca-surface border border-kca-border rounded-2xl overflow-hidden p-1.5 transition-all duration-300",

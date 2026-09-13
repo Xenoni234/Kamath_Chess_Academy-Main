@@ -121,7 +121,40 @@ export default function ClassCallHost({ children }: { children: React.ReactNode 
         height: "100%",
         // Never in the URL — a child's name does not belong in browser history.
         userInfo: { displayName: call.displayName },
-        configOverwrite: { prejoinPageEnabled: false, startWithAudioMuted: true },
+        configOverwrite: {
+          prejoinPageEnabled: false,
+          startWithAudioMuted: true,
+          disableThirdPartyRequests: true,
+          // A class of children does not need a "share this meeting" invite dialog.
+          disableInviteFunctions: true,
+        },
+        // Strip Jitsi's own branding. This is an academy's classroom embedded in the
+        // academy's site — a third party's logo and watermark in the corner of it reads
+        // as someone else's product, and the "powered by" link leads children off-site.
+        interfaceConfigOverwrite: {
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+          SHOW_BRAND_WATERMARK: false,
+          SHOW_POWERED_BY: false,
+          JITSI_WATERMARK_LINK: "",
+          HIDE_DEEP_LINKING_LOGO: true,
+          SHOW_PROMOTIONAL_CLOSE_PAGE: false,
+          DEFAULT_BACKGROUND: "#050505",
+          DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+          MOBILE_APP_PROMO: false,
+          TOOLBAR_BUTTONS: [
+            "microphone",
+            "camera",
+            "desktop",
+            "chat",
+            "raisehand",
+            "participants-pane",
+            "tileview",
+            "fullscreen",
+            "settings",
+            "hangup",
+          ],
+        },
       });
     }
 

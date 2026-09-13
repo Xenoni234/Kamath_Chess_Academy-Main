@@ -112,6 +112,21 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
     setDraft("");
   }
 
+  async function extendClass(minutes: number) {
+    setBusy(true);
+    try {
+      const res = await fetchWithAuth(`/api/classes/${id}/room`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "extend", minutes }),
+      });
+      const data = await res.json();
+      if (data.success) await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleLive(action: "start" | "end") {
     setBusy(true);
     try {
@@ -127,6 +142,54 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
     }
   }
 
+  /**
+   * Warn before the class ends, then end it.
+   *
+   * Nothing used to close a class except a coach remembering to press End, and coaches
+   * close the tab. The class then sat in every student's "Live now" list indefinitely,
+   * advertising a room nobody was in.
+   *
+   * Two parts, and the split matters:
+   *   - the WARNING shows to everyone, five minutes out, so a student is not cut off
+   *     mid-sentence;
+   *   - the automatic END only fires for whoever can manage the class. A student's
+   *     browser must never be able to end a lesson for the whole room, and if every
+   *     participant tried, the room would race to close itself.
+   *
+   * `endedRef` stops the effect firing the request repeatedly once the time has passed.
+   */
+  const endedRef = useRef(false);
+  const [msLeft, setMsLeft] = useState<number | null>(null);
+
+  const isLive = room?.status === "ONGOING";
+  const endsAtMs = room ? new Date(room.endsAt).getTime() : null;
+
+  useEffect(() => {
+    if (!isLive || endsAtMs === null) return;
+
+    const tick = () => {
+      const remaining = endsAtMs - Date.now();
+      setMsLeft(remaining);
+
+      if (remaining <= 0 && canManage && !endedRef.current) {
+        endedRef.current = true;
+        void toggleLive("end");
+      }
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+    // `toggleLive` is stable enough here — it closes over `id` only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, endsAtMs, canManage]);
+
+  const endingSoon = msLeft !== null && msLeft > 0 && msLeft <= 5 * 60 * 1000;
+  const countdown =
+    msLeft !== null && msLeft > 0
+      ? `${Math.floor(msLeft / 60000)}:${String(Math.floor((msLeft % 60000) / 1000)).padStart(2, "0")}`
+      : "0:00";
+
   if (error && !room) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10">
@@ -140,7 +203,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   if (!room) return <div className="mx-auto max-w-3xl px-4 py-10 text-kca-gray-400">Loading room…</div>;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="mx-auto w-full max-w-[1800px] px-4 py-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link href="/dashboard/classes" className="text-sm text-kca-gray-400 hover:text-kca-cyan">
@@ -152,6 +215,12 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
             <span className={room.status === "ONGOING" ? "text-kca-success" : "text-kca-gray-400"}>
               {room.status === "ONGOING" ? "● Live" : room.status.toLowerCase()}
             </span>
+            {isLive && msLeft !== null && msLeft > 0 && (
+              <span className={endingSoon ? "text-kca-warning" : "text-kca-gray-400"}>
+                {" · "}
+                {countdown} left
+              </span>
+            )}
           </p>
         </div>
         {canManage && (
@@ -161,15 +230,59 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
                 Start class
               </button>
             ) : (
-              <button type="button" className="btn-secondary" disabled={busy} onClick={() => toggleLive("end")}>
-                End class
-              </button>
+              <>
+                {/* Adjust the finish time. The class ends itself at `endsAt`, so a coach
+                    who is mid-explanation needs a way to push that back — and one who
+                    finished early should not leave the room advertised for another hour. */}
+                <button
+                  type="button"
+                  className="btn-secondary px-3"
+                  disabled={busy}
+                  title="Finish 15 minutes earlier"
+                  onClick={() => {
+                    endedRef.current = false;
+                    void extendClass(-15);
+                  }}
+                >
+                  −15m
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary px-3"
+                  disabled={busy}
+                  title="Give the class 15 more minutes"
+                  onClick={() => {
+                    endedRef.current = false;
+                    void extendClass(15);
+                  }}
+                >
+                  +15m
+                </button>
+                <button type="button" className="btn-secondary" disabled={busy} onClick={() => toggleLive("end")}>
+                  End class
+                </button>
+              </>
             )}
           </div>
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+      {endingSoon && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-kca-warning/40 bg-kca-warning/10 px-4 py-3">
+          <span className="text-sm font-semibold text-kca-warning">
+            This class ends in {countdown}.
+          </span>
+          {canManage && (
+            <span className="text-xs text-kca-gray-400">
+              Need longer? Press +15m — otherwise it will close on its own.
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* The video takes whatever is left after a fixed sidebar, and the row is as tall as
+          the viewport allows — a class is something you look at, not a card on a page. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:min-h-[calc(100vh-11rem)]">
         {/* Video: external link → SFU (mediasoup) → embedded Jitsi fallback. */}
         <div className="card overflow-hidden p-0">
           {room.meetingUrl ? (
@@ -597,7 +710,9 @@ function CallSlot({
   }
 
   // Just a measured box. The video is drawn over it by the host.
-  return <div ref={ref} className="min-h-[24rem] w-full" />;
+  // Fills the column it sits in. The host draws the video over this box, so its height IS
+  // the video's height — a fixed 24rem left most of a laptop screen black.
+  return <div ref={ref} className="h-full min-h-[32rem] w-full" />;
 }
 
 /** A <video> that binds a MediaStream via ref (srcObject isn't a real attribute). */
