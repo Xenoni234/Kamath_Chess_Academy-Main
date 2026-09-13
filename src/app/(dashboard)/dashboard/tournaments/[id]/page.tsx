@@ -8,6 +8,7 @@ import { getSocket } from "@/lib/socket/client";
 import { cn } from "@/lib/utils";
 import { useHasRole } from "@/components/auth/RoleContext";
 import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
+import TournamentEntryForm from "@/components/dashboard/TournamentEntryForm";
 
 type Standing = { rank: number; userId?: string; username: string; score: number };
 type Detail = {
@@ -19,6 +20,13 @@ type Detail = {
   startsAt: string;
   joined: boolean;
   standings: Standing[];
+  // Only sent to signed-in users — the public endpoint never selects these.
+  isOffline?: boolean;
+  venue?: string | null;
+  entryFee?: string | null;
+  contactInfo?: string | null;
+  prizePool?: string | null;
+  formatNote?: string | null;
 };
 
 const TYPE_LABEL: Record<string, string> = { ARENA: "Arena", SWISS: "Swiss", ROUND_ROBIN: "Round Robin" };
@@ -153,6 +161,37 @@ export default function TournamentDetailPage() {
               {round !== null && t.status === "ONGOING" && <> · Round {round}</>}
             </p>
             {t.description && <p className="text-sm text-kca-gray-300 mt-3">{t.description}</p>}
+
+            {/* The details a visitor could not see. Shown here because this page is
+                behind the login — that is what "Sign in for details" promised. */}
+            {t.isOffline && (
+              <dl className="mt-4 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                {t.venue && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wider text-kca-gray-400">Venue</dt>
+                    <dd className="text-kca-white">{t.venue}</dd>
+                  </div>
+                )}
+                {t.entryFee && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wider text-kca-gray-400">Entry fee</dt>
+                    <dd className="text-kca-white">{t.entryFee}</dd>
+                  </div>
+                )}
+                {t.prizePool && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wider text-kca-gray-400">Prize pool</dt>
+                    <dd className="text-kca-white">{t.prizePool}</dd>
+                  </div>
+                )}
+                {t.contactInfo && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wider text-kca-gray-400">Contact</dt>
+                    <dd className="text-kca-white">{t.contactInfo}</dd>
+                  </div>
+                )}
+              </dl>
+            )}
           </div>
           <span className={cn("shrink-0 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wider", STATUS_STYLE[t.status])}>
             {t.status}
@@ -160,12 +199,14 @@ export default function TournamentDetailPage() {
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          {t.status === "UPCOMING" && !t.joined && (
+          {/* An over-the-board event is entered with a form, not a Join button — there is
+              no pairing engine involved and the academy needs a name and a number. */}
+          {!t.isOffline && t.status === "UPCOMING" && !t.joined && (
             <button onClick={() => post("join")} disabled={busy} className="btn-primary py-2 px-4 disabled:opacity-50">
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Join tournament"}
             </button>
           )}
-          {t.status === "UPCOMING" && t.joined && (
+          {!t.isOffline && t.status === "UPCOMING" && t.joined && (
             <span className="inline-flex items-center gap-1.5 text-sm text-kca-success">
               <Check className="w-4 h-4" /> You&apos;re registered
             </span>
@@ -192,6 +233,17 @@ export default function TournamentDetailPage() {
         </div>
         {error && <p className="mt-3 text-sm text-kca-danger">{error}</p>}
       </div>
+
+      {/* Entry form for over-the-board events. Staff see the list of who entered; a
+          player sees their own entry — the server decides which, not this page. */}
+      {t.isOffline && (
+        <div className="mb-6">
+          <TournamentEntryForm
+            tournamentId={t.id}
+            closed={t.status === "FINISHED" || t.status === "CANCELLED"}
+          />
+        </div>
+      )}
 
       <div className="card border border-kca-border bg-kca-surface overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-3 border-b border-kca-border">

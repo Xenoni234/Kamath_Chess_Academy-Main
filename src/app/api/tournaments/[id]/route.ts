@@ -42,6 +42,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         type: tournament.type,
         status: tournament.status,
         startsAt: tournament.startsAt,
+        // The details the public endpoint deliberately withholds. This route is
+        // authenticated, which is what "sign in for details" means in practice.
+        isOffline: tournament.isOffline,
+        venue: tournament.venue,
+        entryFee: tournament.entryFee,
+        contactInfo: tournament.contactInfo,
+        prizePool: tournament.prizePool,
+        formatNote: tournament.formatNote,
         joined: tournament.players.some((p) => p.userId === payload.userId),
         standings: tournament.players.map((p, i) => ({
           rank: p.rank ?? i + 1,
