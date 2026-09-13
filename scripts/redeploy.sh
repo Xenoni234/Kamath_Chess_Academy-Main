@@ -46,8 +46,22 @@ echo "==> Pulling"
 git pull --ff-only origin main
 
 echo
+# Build ONE image at a time. This box has 2 vCPUs and a few GB of RAM, and
+# `docker compose up --build` builds `app` and `worker` in PARALLEL — two Next.js
+# builds at once, beside the live stack that is still serving traffic. That is what
+# wedged the server: it swapped until SSH and HTTP both stopped answering, and the
+# site was down until it was rebooted from the hosting panel.
+#
+# Serial builds take longer and finish.
 echo "==> Rebuilding (the site stays up until the new image is ready)"
-docker compose up -d --build
+echo "    Building one image at a time — parallel builds have OOMed this box before."
+# Two separate invocations, each naming ONE service — serial by construction, with no
+# flag whose support varies between compose versions.
+docker compose build app
+docker compose build worker
+
+echo "==> Swapping containers"
+docker compose up -d --no-build
 
 echo
 echo "==> Waiting for the app to come back"
