@@ -8,6 +8,7 @@ import { writeAuditLog } from "@/lib/audit";
 // The SFU switch comes from its own dependency-free module so this route never
 // imports the native mediasoup binding, which exists only in the socket server.
 import { mediaEnabledFromEnv } from "@/lib/media/enabled";
+import { jaasAppId, jaasConfigured, mintJaasToken } from "@/lib/media/jaas";
 
 export const runtime = "nodejs";
 
@@ -109,6 +110,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       videoRoomKey,
       coachName: cls.coach?.user.username ?? null,
     },
+    /**
+     * A JaaS token for THIS person joining THIS room, minted only past the authorisation
+     * gate above — the same gate that guards `videoRoomKey`. Null when JaaS is not
+     * configured, in which case the client falls back to public meet.jit.si.
+     *
+     * This is what removes the second login: Jitsi is told who the viewer is by a
+     * signature it trusts, so it stops asking a nine-year-old to sign in with Google.
+     * The coach gets moderator; everyone else joins as a participant.
+     */
+    jaas: jaasConfigured()
+      ? {
+          appId: jaasAppId(),
+          room: `${jaasAppId()}/KCA-${videoRoomKey}`,
+          token: mintJaasToken({
+            room: `KCA-${videoRoomKey}`,
+            userId: payload.userId,
+            name: payload.username,
+            role: isCoach || canManage ? "moderator" : "participant",
+          }),
+        }
+      : null,
     isCoach,
     canManage,
     viewerName: payload.username,

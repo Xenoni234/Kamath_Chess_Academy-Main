@@ -5,6 +5,10 @@ import Link from "next/link";
 import { getSocket } from "@/lib/socket/client";
 import { useMediaRoom, type RemoteStream } from "@/lib/media/roomClient";
 import { fetchWithAuth } from "@/lib/http/fetchWithAuth";
+import { useCallAnchor, useClassCall } from "@/components/media/ClassCallHost";
+
+/** What the room route mints for this viewer. Null means JaaS is not configured. */
+type JaasInfo = { appId: string | null; room: string; token: string | null } | null;
 
 type ChatMessage = { id: string; userId: string; username: string; body: string; createdAt: string };
 type RosterEntry = { userId: string; username: string };
@@ -29,6 +33,9 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
   const [canManage, setCanManage] = useState(false);
   const [sfuEnabled, setSfuEnabled] = useState(false);
   const [viewerName, setViewerName] = useState("student");
+  // Minted server-side per viewer per room; null when JaaS is not configured, in which
+  // case the embed falls back to public meet.jit.si.
+  const [jaas, setJaas] = useState<JaasInfo>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [draft, setDraft] = useState("");
@@ -47,6 +54,7 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
     setCanManage(Boolean(data.canManage));
     setSfuEnabled(Boolean(data.sfuEnabled));
     setViewerName(data.viewerName ?? "student");
+    setJaas(data.jaas ?? null);
     setMessages(data.messages ?? []);
   }, [id]);
 
@@ -179,7 +187,13 @@ export default function ClassRoomPage({ params }: { params: Promise<{ id: string
           ) : sfuEnabled ? (
             <SfuStage classId={room.id} />
           ) : (
-            <JitsiEmbed roomKey={room.videoRoomKey} displayName={viewerName} />
+            <CallSlot
+              classId={room.id}
+              classTitle={room.title}
+              roomKey={room.videoRoomKey}
+              displayName={viewerName}
+              jaas={jaas}
+            />
           )}
         </div>
 
@@ -529,94 +543,61 @@ function AttendancePanel({ classId, presentUserIds }: { classId: string; present
 }
 
 /**
- * The embedded Jitsi call.
+ * The class room's video area.
  *
- * Two things here are security fixes, not style choices.
+ * It renders no iframe of its own. It asks the persistent host (mounted in the dashboard
+ * layout) to start or ADOPT the call, then publishes its own rectangle so the host's fixed
+ * element lines up with this box and reads as embedded.
+ *
+ * Leaving the page unmounts only this placeholder. The call keeps running and becomes the
+ * corner window, which is what lets a coach open the analysis board mid-lesson without
+ * ending the class for everyone in it.
+ *
+ * Two properties of the old embed are preserved and must stay:
  *
  * **The room name is a secret from the server, not the class id.** It used to be
- * `KCA-<class cuid>`, so anyone who learned or guessed a class id could walk into
- * a live class of minors with no KCA account. The server now mints a random key
- * behind the authorisation check and rotates it whenever the coach starts the
- * class, so a forwarded link dies with the session.
+ * `KCA-<class cuid>`, so anyone who learned or guessed a class id could walk into a live
+ * class of minors with no KCA account. The server mints a random key behind the
+ * authorisation check and rotates it when the coach starts the class.
  *
- * **The display name is passed through the IFrame API, not the URL.** It was in
- * the `#userInfo.displayName=` fragment, which puts a child's name into browser
- * history, the DOM `src` attribute, and anything that reads either. `userInfo` in
- * the options object never leaves JavaScript.
+ * **The display name goes through the IFrame API, never the URL.** It was in the
+ * `#userInfo.displayName=` fragment, which puts a child's name into browser history and
+ * the DOM `src` attribute.
  *
- * Be clear about what this is: a secret room name on public `meet.jit.si` is
- * obscurity, not authentication. It closes enumeration and stale-link reuse. Real
- * authentication is 8x8 JaaS with a signed JWT, or the self-hosted SFU — both
- * tracked separately.
+ * With JaaS configured the room is genuinely authenticated rather than merely obscure,
+ * and nobody is asked to sign in to Jitsi — see `src/lib/media/jaas.ts`.
  */
-function JitsiEmbed({ roomKey, displayName }: { roomKey: string | null; displayName: string }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [failed, setFailed] = useState(false);
+function CallSlot({
+  classId,
+  classTitle,
+  roomKey,
+  displayName,
+  jaas,
+}: {
+  classId: string;
+  classTitle: string;
+  roomKey: string | null;
+  displayName: string;
+  jaas: JaasInfo;
+}) {
+  const { startCall } = useClassCall();
+  const ref = useCallAnchor(Boolean(roomKey));
 
   useEffect(() => {
-    if (!roomKey || !containerRef.current) return;
-    const parentNode = containerRef.current;
-    let api: { dispose: () => void } | null = null;
-    let cancelled = false;
-
-    const SCRIPT_ID = "jitsi-external-api";
-    function start() {
-      const Ctor = (window as unknown as { JitsiMeetExternalAPI?: new (domain: string, options: unknown) => { dispose: () => void } })
-        .JitsiMeetExternalAPI;
-      if (cancelled || !Ctor) return;
-      api = new Ctor("meet.jit.si", {
-        roomName: `KCA-${roomKey}`,
-        parentNode,
-        width: "100%",
-        height: "100%",
-        // Never in the URL — see the note above.
-        userInfo: { displayName },
-        configOverwrite: { prejoinPageEnabled: false },
-      });
-    }
-
-    const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing) {
-      if ((window as unknown as { JitsiMeetExternalAPI?: unknown }).JitsiMeetExternalAPI) start();
-      else existing.addEventListener("load", start, { once: true });
-    } else {
-      const script = document.createElement("script");
-      script.id = SCRIPT_ID;
-      script.src = "https://meet.jit.si/external_api.js";
-      script.async = true;
-      script.onload = start;
-      script.onerror = () => setFailed(true);
-      document.body.appendChild(script);
-    }
-
-    return () => {
-      cancelled = true;
-      api?.dispose();
-    };
-  }, [roomKey, displayName]);
+    if (!roomKey) return;
+    startCall({ classId, classTitle, roomKey, displayName, jaas });
+  }, [classId, classTitle, roomKey, displayName, jaas, startCall]);
 
   if (!roomKey) {
     return (
       <div className="flex min-h-[24rem] items-center justify-center p-8 text-center text-sm text-kca-gray-400">
-        Preparing the video room…
+        Preparing the room…
       </div>
     );
   }
 
-  return (
-    <div className="flex flex-col">
-      <div ref={containerRef} className="h-[70vh] min-h-[24rem] w-full" />
-      {failed ? (
-        <p className="border-t border-kca-border px-3 py-2 text-center text-xs text-kca-danger">
-          Video failed to load. You can still use the chat.
-        </p>
-      ) : (
-        <p className="border-t border-kca-border px-3 py-2 text-center text-xs text-kca-gray-400">
-          This room is private to your class. Please don&rsquo;t share the link.
-        </p>
-      )}
-    </div>
-  );
+  // Just a measured box. The video is drawn over it by the host.
+  return <div ref={ref} className="min-h-[24rem] w-full" />;
 }
 
 /** A <video> that binds a MediaStream via ref (srcObject isn't a real attribute). */
