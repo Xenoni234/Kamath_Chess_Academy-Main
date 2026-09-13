@@ -26,8 +26,23 @@ export async function GET(request: NextRequest) {
     const denied = requireRole(payload, ["HR", "HEAD"]);
     if (denied) return denied;
 
+    /**
+     * `?role=` takes one role or several, comma-separated.
+     *
+     * It was one only, and that quietly excluded HEAD from every "pick a coach" dropdown
+     * — even though HEAD passes `requireRole(["HR","HEAD","COACH"])` on classes and batches
+     * everywhere else, and at a small academy the owner is usually the one teaching. The
+     * list you can assign from has to match the list the API will accept.
+     *
+     * Unknown names are dropped rather than failing the request: a stale caller asking for
+     * a role that no longer exists should get a narrower list, not an error.
+     */
     const roleParam = request.nextUrl.searchParams.get("role");
-    const where = roleParam && VALID_ROLES.includes(roleParam) ? { role: roleParam as Role } : {};
+    const roles = (roleParam ?? "")
+      .split(",")
+      .map((r) => r.trim().toUpperCase())
+      .filter((r) => VALID_ROLES.includes(r)) as Role[];
+    const where = roles.length ? { role: { in: roles } } : {};
 
     const users = await db.user.findMany({
       where: { ...where, isActive: true },
