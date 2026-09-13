@@ -30,7 +30,7 @@ type Achievement = {
 
 function Card({ item, duplicate }: { item: Achievement; duplicate: boolean }) {
   return (
-    <div aria-hidden={duplicate} className="card flex w-80 shrink-0 flex-col justify-between">
+    <div aria-hidden={duplicate} className="card flex w-80 shrink-0 flex-col items-center justify-between text-center">
       <div>
         {item.hasPhoto ? (
           /*
@@ -41,7 +41,7 @@ function Card({ item, duplicate }: { item: Achievement; duplicate: boolean }) {
            * 4:3 landscape crop cut off their heads and feet. A square at 144px is large
            * enough to see a face and crops a portrait far more kindly.
            */
-          <div className="mb-5 h-36 w-36 overflow-hidden rounded-xl border border-kca-cyan/20">
+          <div className="mx-auto mb-5 h-36 w-36 overflow-hidden rounded-xl border border-kca-cyan/20">
             <Image
               src={`/api/public/photo/achievement/${item.id}`}
               alt={duplicate ? "" : item.name}
@@ -52,7 +52,7 @@ function Card({ item, duplicate }: { item: Achievement; duplicate: boolean }) {
             />
           </div>
         ) : (
-          <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-lg border border-kca-cyan/20 bg-kca-cyan/10">
+          <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-lg border border-kca-cyan/20 bg-kca-cyan/10">
             <Trophy className="h-6 w-6 text-kca-cyan" />
           </div>
         )}
