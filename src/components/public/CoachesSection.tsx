@@ -32,7 +32,7 @@ function CoachCard({ coach, duplicate }: { coach: Coach; duplicate: boolean }) {
   return (
     <div aria-hidden={duplicate} className="card flex w-72 shrink-0 flex-col items-center text-center">
       {coach.hasPhoto ? (
-        <div className="mb-6 h-40 w-40 overflow-hidden rounded-full border-2 border-kca-cyan/20">
+        <div className="mb-5 h-32 w-32 overflow-hidden rounded-full border-2 border-kca-cyan/20">
           <Image
             src={`/api/public/photo/coach/${coach.id}`}
             alt={duplicate ? "" : coach.name}
