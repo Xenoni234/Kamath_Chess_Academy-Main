@@ -619,6 +619,42 @@ audit-log viewer, and the role context provider. Razorpay is built and gated beh
   version — which is why the fix appeared not to work on the deploy that delivered it.
 
 
+- **`POST /api/auth/login` is rate limited in-process, and that is deliberate — do not
+  "unify" it with the Redis limiters.** A friendly attack on 10 Oct 2026 took the entire
+  platform down through this one route. `comparePassword` is **bcryptjs** (pure JS) at cost
+  12, so it runs **on the main event loop**: measured 197 ms per compare on an M4 with the
+  loop available only **10 %** of that window, and the production vCPU is slower again.
+  There is one Node process and no clustering, so single-digit requests per second stopped
+  every page, every API call and every Socket.io frame. Then the pool: a successful login
+  takes one connection for the lookup and **two more in parallel** for the session and
+  audit writes, out of `max: 10` — so the pool emptied and every unrelated query in the app
+  waited the full 10 s `connectionTimeoutMillis` and failed with "timeout exceeded when
+  trying to connect". One unmetered route read as a total outage.
+  Four properties of `src/lib/http/rateLimit.ts` are load-bearing: it is **synchronous and
+  in-memory** (the guard must be cheaper than the thing it guards, and must have no
+  failure mode — a Redis limiter has to choose between failing open when the system is
+  already stressed and locking students out on a cache blip); **successful logins still
+  cost budget**, because the attack used VALID credentials and a failures-only limiter
+  would have let it straight through; the key Map is **bounded and refuses rather than
+  evicting**, or it becomes the memory-exhaustion bug it exists to prevent; and `clientIp`
+  reads the **last** `X-Forwarded-For` hop. That last one matters more than it looks —
+  Caddy *appends*, so the leftmost entry is attacker-controlled text, and the older Redis
+  limiters in `/api/contact` and `/api/analysis/explain` take `[0]` and are **bypassable
+  with one forged header**. `scripts/verifyLoginThrottle.ts` pins all of it (27 checks) and
+  already caught a `>` that should have been `>=`.
+  **Still outstanding from that incident:** bcrypt is on the event loop (move it to a
+  `worker_threads` pool or native `bcrypt`, which also lets the login timing be equalised
+  to close the user-enumeration oracle), Caddy has no rate limit, no container has a memory
+  limit, and `docker-compose.yml` / `Dockerfile` exist only on the server.
+- **A refresh token carries a `jti`.** Without it the signed payload was
+  `{userId, username, role}` + `iat`/`exp`, all whole **seconds**, so two logins by one
+  account in the same second produced a byte-identical token — and
+  `UserSession.refreshToken` is `@unique`. The insert died with P2002 and login returned
+  500 having already paid for the hash and the round trips; that error filled the
+  production log during the attack. It is **not** only an attack symptom: it fires when a
+  student double-clicks "Sign in", or signs in on a phone and a laptop at once. It also
+  meant a "session" was not per-login — two devices could not be told apart or revoked
+  separately, which is the whole point of the table.
 - **`src/lib/pdf/launch.ts` is the only place Chromium may be launched.** All three
   renderers used bare `puppeteer.launch({headless:true})`, and the deployment image
   runs as root, where Chromium's setuid sandbox refuses to start. Every PDF in the
@@ -771,6 +807,7 @@ npx tsx scripts/verifyGameState.ts     # a finished game renders as PLAYED, not 
 npx tsx scripts/verifyEndCleanly.ts    # a truncated AI answer ends tidily and loses nothing finished
 npx tsx scripts/verifyMarkdownHtml.ts  # the PDFs render markdown instead of printing ** and -
 npx tsx scripts/verifyClock.ts         # the running clock belongs to the player whose move it is
+npx tsx scripts/verifyLoginThrottle.ts # the login flood that took the site down stays capped
 npx tsx --env-file=.env.production scripts/verifyJaas.ts   # a broken JaaS key vs no key at all
 
 # Housekeeping and operations (run against the real database / server).
