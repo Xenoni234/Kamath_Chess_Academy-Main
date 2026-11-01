@@ -39,6 +39,63 @@ function authenticateSocket(socket: Socket) {
   }
 }
 
+/**
+ * Per-connection ceiling on inbound events.
+ *
+ * There are 23 `socket.on` handlers across the handler modules and, until this, not one of them
+ * had any budget: an authenticated user could emit `game:move` or `class:chat` in a loop and
+ * every one of those would be processed on the SAME single event loop that the 10 Oct 2026
+ * login flood took the platform down through. It ranks below that one because it needs a real
+ * account — but a student with a browser console is not a high bar.
+ *
+ * `socket.use` is socket.io's inbound-packet hook, so this covers all 23 handlers in one place
+ * rather than needing a guard added to each — and, more importantly, it covers the next handler
+ * someone adds without them having to remember.
+ *
+ * The budget is per socket and lives in a closure, so it is garbage collected with the
+ * connection; there is no map to grow or sweep. 120 events per 10 s is ~12/s sustained, which is
+ * far above real play — a blitz game produces a few moves a second at most, and the chat and
+ * presence traffic is trivial next to that — and far below anything that can hurt the loop.
+ *
+ * A caller that keeps going well past the ceiling is disconnected rather than refused forever:
+ * answering a flood with an error packet per request is still work we are doing on its behalf.
+ */
+const EVENT_BUDGET = 120;
+const EVENT_WINDOW_MS = 10_000;
+/** Past this much over budget, stop replying and drop the connection. */
+const DISCONNECT_MULTIPLIER = 5;
+
+function installEventBudget(socket: Socket) {
+  let windowStart = Date.now();
+  let count = 0;
+
+  socket.use((_packet, next) => {
+    const now = Date.now();
+
+    if (now - windowStart >= EVENT_WINDOW_MS) {
+      windowStart = now;
+      count = 0;
+    }
+
+    count += 1;
+
+    if (count > EVENT_BUDGET * DISCONNECT_MULTIPLIER) {
+      socket.disconnect(true);
+      return;
+    }
+
+    if (count > EVENT_BUDGET) {
+      // Reaches the client as an `error` event. Deliberately not silent: a legitimate client
+      // hitting this is a bug worth seeing, and a dropped packet with no reply looks like the
+      // server hanging.
+      next(new Error("Too many requests on this connection. Slow down."));
+      return;
+    }
+
+    next();
+  });
+}
+
 export function setupSocketServer(io: Server) {
   const connectedUsers: ConnectedUsers = new Map();
 
@@ -63,6 +120,8 @@ export function setupSocketServer(io: Server) {
     // without the role here `canAccess` could only ever see the coach and the
     // enrolled students.
     socket.data.role = payload.role;
+
+    installEventBudget(socket);
 
     // Personal room for direct server→user emits (notifications, etc.).
     socket.join(`user:${payload.userId}`);
