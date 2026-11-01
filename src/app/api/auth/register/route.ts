@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { clientIp } from "@/lib/http/clientIp";
+import { consume } from "@/lib/http/rateLimit";
+import { tooManyRequests } from "@/lib/http/tooMany";
 import { hashPassword } from "@/lib/auth";
 import { verifyOtpCode } from "@/lib/otp";
 import { registerSchema, CODE_REQUIRED_ROLES } from "@/lib/validations";
@@ -14,8 +17,22 @@ import { resolveParentClaim } from "@/lib/parentCode";
  */
 const CONSENT_VERSION = "2026-09";
 
+/**
+ * Registration is already gated by an emailed code, and `/api/auth/otp/send` caps code issuance
+ * per address — so bcrypt was never reachable here in bulk, and this is NOT the route that took
+ * the site down. What it did have was an unbounded database round trip per request. The cap is
+ * loose enough for a whole intake session signing up from one school connection.
+ */
+const MAX_PER_IP = 20;
+const IP_WINDOW_MS = 60 * 60_000;
+
 export async function POST(request: Request) {
   try {
+    const limited = consume(`register:ip:${clientIp(request)}`, MAX_PER_IP, IP_WINDOW_MS);
+    if (limited.limited) {
+      return tooManyRequests(limited.retryAfterSeconds);
+    }
+
     const body = await request.json();
 
     const result = registerSchema.safeParse(body);

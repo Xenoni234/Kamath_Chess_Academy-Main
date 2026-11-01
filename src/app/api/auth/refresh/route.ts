@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signAccessToken, verifyRefreshToken } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { clientIp } from "@/lib/http/clientIp";
+import { consume } from "@/lib/http/rateLimit";
+import { tooManyRequests } from "@/lib/http/tooMany";
 
 /**
  * Mints a fresh access token from the refresh cookie.
@@ -10,8 +13,21 @@ import { db } from "@/lib/db";
  * problem": one database blip used to answer 401 "Invalid refresh token", and
  * the client tears the session down on that. A lookup failure is now a 500, so
  * the client retries instead of logging the user out.
+ *
+ * Metered because it was completely unbounded: a database lookup per request, reachable
+ * without an access token. The cap is generous for exactly the reason above — a whole school
+ * behind one address, each student refreshing every 15 minutes, must never hit it. 60 per five
+ * minutes is roughly six times the busiest realistic case.
  */
+const MAX_PER_IP = 60;
+const IP_WINDOW_MS = 5 * 60_000;
+
 export async function POST(request: NextRequest) {
+  const limited = consume(`refresh:ip:${clientIp(request)}`, MAX_PER_IP, IP_WINDOW_MS);
+  if (limited.limited) {
+    return tooManyRequests(limited.retryAfterSeconds);
+  }
+
   const refreshToken = request.cookies.get("kca_refresh_token")?.value;
 
   if (!refreshToken) {

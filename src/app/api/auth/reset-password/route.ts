@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { clientIp } from "@/lib/http/clientIp";
+import { consume } from "@/lib/http/rateLimit";
+import { tooManyRequests } from "@/lib/http/tooMany";
 import { hashPassword } from "@/lib/auth";
 import { verifyOtpCode } from "@/lib/otp";
 import { writeAuditLog } from "@/lib/audit";
@@ -16,9 +19,21 @@ export const runtime = "nodejs";
  *
  * Also the activation path for staff-created accounts: they are created without a
  * usable password and the invite email points here.
+ *
+ * Metered for the same reason as registration: code-gated, so not a CPU vector, but each call
+ * was an unbounded database round trip. Generous enough that a coach fumbling an invite link
+ * several times is never blocked.
  */
+const MAX_PER_IP = 20;
+const IP_WINDOW_MS = 60 * 60_000;
+
 export async function POST(request: Request) {
   try {
+    const limited = consume(`reset:ip:${clientIp(request)}`, MAX_PER_IP, IP_WINDOW_MS);
+    if (limited.limited) {
+      return tooManyRequests(limited.retryAfterSeconds);
+    }
+
     const body = await request.json().catch(() => null);
     const parsed = resetPasswordSchema.safeParse(body);
 
