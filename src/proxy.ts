@@ -12,10 +12,15 @@ const roleRoutes: Record<string, string[]> = {
   "/dashboard/hr": ["HR", "HEAD"],
   "/dashboard/head": ["HEAD"],
   "/dashboard/admin": ["HR", "HEAD"],
-  // Narrower than the rest of /dashboard/admin. Fees are the head's alone, and
-  // the segment matcher takes the LONGEST match, so this is not shadowed by the
-  // line above.
+  // Narrower than the rest of /dashboard/admin, and the segment matcher takes the
+  // LONGEST match, so neither is shadowed by the line above.
+  //
+  // Fees are the head's alone. So is website content: `/api/admin/site` enforces
+  // `requireRole(payload, ["HEAD"])`, and without this entry an HR user could open
+  // /dashboard/admin/website and watch every request on it fail — the page gating more
+  // loosely than the API behind it, which reads as a broken feature rather than a refusal.
   "/dashboard/admin/payments": ["HEAD"],
+  "/dashboard/admin/website": ["HEAD"],
   "/dashboard/schedule": ["COACH", "HR", "HEAD"],
   "/dashboard/children": ["PARENT", "HR", "HEAD"],
   "/dashboard/roster": ["COACH", "HR", "HEAD"],
