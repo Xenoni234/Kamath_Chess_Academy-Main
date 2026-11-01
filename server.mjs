@@ -19,6 +19,23 @@ app.prepare().then(async () => {
     // routing) so the document actually loads without isolation.
     const isClassRoom = pathname.startsWith('/dashboard/classes/') && pathname.endsWith('/room')
 
+    // Baseline security headers, on every response including the class room.
+    //
+    // Caddy does NOT add HSTS on its own — automatic HTTPS gets you the certificate and the
+    // redirect, not the policy — so without this line a first visit over http:// is still
+    // interceptable before the redirect lands. One year, subdomains included; deliberately no
+    // `preload`, because that is a hard-to-reverse submission to a browser-vendor list.
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    // Stops a browser second-guessing a Content-Type — the vector behind "upload a .txt that
+    // runs as script". This app serves user-supplied PDFs and photos from its own origin.
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    // Full URLs stay on this origin. Dashboard paths carry student and game ids, and those
+    // should not travel to Lichess or the AI provider in a Referer header.
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+    // Nothing here is meant to be framed by anyone else. Note this is about OUR pages being
+    // embedded; the class room embedding Jitsi is the opposite direction and unaffected.
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+
     if (!isClassRoom) {
       // Cross-origin isolation. The multi-threaded Stockfish build in
       // public/engine/ needs SharedArrayBuffer, which browsers only expose to
@@ -33,6 +50,20 @@ app.prepare().then(async () => {
       res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
       res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
       res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+
+      // Deny the hardware this app never uses — but ONLY outside the class room, which is why
+      // this sits inside the carve-out rather than beside the headers above.
+      //
+      // Permissions-Policy is not delegated to a CROSS-ORIGIN iframe by `camera=(self)`: self
+      // means this origin, and the Jitsi frame is not this origin. So a global camera/microphone
+      // denial would leave the video class rendering perfectly and simply never getting a
+      // camera — exactly the kind of silent breakage that only shows up in a real lesson with a
+      // real child waiting. The class-room document therefore gets no Permissions-Policy at all,
+      // and the iframe's own `allow` attribute governs it.
+      res.setHeader(
+        'Permissions-Policy',
+        'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+      )
     }
 
     await handle(req, res, parsedUrl)
