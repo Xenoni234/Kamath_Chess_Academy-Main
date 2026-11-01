@@ -1,8 +1,15 @@
 import { addDays } from "date-fns";
 import { NextRequest, NextResponse } from "next/server";
-import { comparePassword, signAccessToken, signRefreshToken } from "@/lib/auth";
+import {
+  compareAgainstDecoy,
+  comparePassword,
+  signAccessToken,
+  signRefreshToken,
+} from "@/lib/auth";
 import { db } from "@/lib/db";
-import { clientIp, consume, exceeded, reset } from "@/lib/http/rateLimit";
+import { clientIp } from "@/lib/http/clientIp";
+import { tooManyRequests } from "@/lib/http/tooMany";
+import { consume, exceeded, reset } from "@/lib/http/rateLimit";
 import { loginSchema } from "@/lib/validations";
 
 /**
@@ -43,17 +50,12 @@ const IP_WINDOW_MS = 5 * 60_000;
 const MAX_FAILURES_PER_ACCOUNT = 10;
 const ACCOUNT_WINDOW_MS = 15 * 60_000;
 
-function tooMany(retryAfterSeconds: number) {
-  // A deliberately vague message. "Too many attempts for THIS ACCOUNT" would confirm the
-  // account exists, which is the one thing an unauthenticated caller must not learn here.
-  return NextResponse.json(
-    {
-      success: false,
-      message: "Too many sign-in attempts. Please wait a few minutes and try again.",
-    },
-    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
-  );
-}
+const TOO_MANY_MESSAGE = "Too many sign-in attempts. Please wait a few minutes and try again.";
+
+// Deliberately vague, and the SAME message for both budgets. "Too many attempts for THIS
+// ACCOUNT" would confirm the account exists, which is the one thing an unauthenticated caller
+// must not learn here.
+const tooMany = (retryAfterSeconds: number) => tooManyRequests(retryAfterSeconds, TOO_MANY_MESSAGE);
 
 export async function POST(request: NextRequest) {
   try {
@@ -96,7 +98,14 @@ export async function POST(request: NextRequest) {
       select: { id: true, username: true, email: true, role: true, passwordHash: true },
     });
 
-    if (!user || !(await comparePassword(password, user.passwordHash))) {
+    // Always spend the cost of a password comparison, even when there is no such account, so
+    // the response time cannot be used to discover which accounts exist. See
+    // `compareAgainstDecoy`. Affordable only because hashing is off the event loop now.
+    const passwordOk = user
+      ? await comparePassword(password, user.passwordHash)
+      : await compareAgainstDecoy(password);
+
+    if (!user || !passwordOk) {
       consume(accountKey, MAX_FAILURES_PER_ACCOUNT, ACCOUNT_WINDOW_MS);
       return NextResponse.json({ success: false, message: "Invalid credentials." }, { status: 401 });
     }

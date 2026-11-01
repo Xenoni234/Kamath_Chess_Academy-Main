@@ -35,12 +35,12 @@ process.env.JWT_REFRESH_SECRET ??= "verify-only-refresh-secret-not-a-real-key";
 
 import {
   clearAll,
-  clientIp,
   consume,
   exceeded,
   reset,
   trackedKeys,
 } from "../src/lib/http/rateLimit.ts";
+import { clientIp } from "../src/lib/http/clientIp.ts";
 import { signRefreshToken, verifyRefreshToken } from "../src/lib/auth.ts";
 
 let pass = 0;

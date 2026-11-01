@@ -138,35 +138,3 @@ export function trackedKeys() {
 export function clearAll() {
   windows.clear();
 }
-
-/**
- * The client's address, as seen by OUR proxy — not as claimed by the client.
- *
- * `X-Forwarded-For` is a list that each hop APPENDS to, so the leftmost entry is whatever
- * the client sent and the rightmost is what the nearest trusted proxy observed. Caddy is
- * the only ingress (the app publishes no ports, only `expose`), so the last element is the
- * real peer and everything before it is attacker-controlled text.
- *
- * Taking `[0]`, which is the obvious-looking choice and what the older limiters in this
- * codebase do, hands the attacker the bucket key: one random header value per request and
- * every request lands in a fresh window, so the limit never triggers. Read the LAST hop.
- */
-export function clientIp(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-
-  if (forwarded) {
-    const hops = forwarded
-      .split(",")
-      .map((hop) => hop.trim())
-      .filter(Boolean);
-
-    if (hops.length > 0) {
-      return hops[hops.length - 1];
-    }
-  }
-
-  // Caddy always sets X-Forwarded-For, so this is the direct-connection case: a request
-  // that reached the app without passing the proxy. Treat every such request as one
-  // shared bucket rather than as unlimited.
-  return "direct";
-}
