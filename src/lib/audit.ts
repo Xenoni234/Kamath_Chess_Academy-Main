@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "./db";
+import { clientIp } from "./http/clientIp";
 
 /**
  * Append an entry to the AuditLog. India's DPDPA 2023 requires that all access
@@ -9,6 +10,10 @@ import { db } from "./db";
  *
  * Best-effort and non-throwing: a logging failure must never break the request
  * it is auditing.
+ *
+ * The address comes from `clientIp`, which reads the LAST `X-Forwarded-For` hop. This used
+ * to take the first, which is supplied by the caller — so the one record meant to prove who
+ * touched a child's data stored whatever address the caller chose to send.
  */
 export async function writeAuditLog(params: {
   action: string;
@@ -23,7 +28,7 @@ export async function writeAuditLog(params: {
         action: params.action,
         userId: params.userId ?? null,
         metadata: params.metadata,
-        ipAddress: headers?.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+        ipAddress: params.request ? clientIp(params.request) : null,
         userAgent: headers?.get("user-agent") ?? null,
       },
     });

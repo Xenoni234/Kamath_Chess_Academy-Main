@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { clientIp } from "@/lib/http/clientIp";
 import { sendEmail } from "@/lib/email";
 import { redis } from "@/lib/redis";
 import { contactSchema } from "@/lib/validations";
@@ -17,7 +18,7 @@ const MAX_PER_IP_HOUR = 5;
 
 async function rateLimited(request: Request): Promise<boolean> {
   try {
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const ip = clientIp(request);
     const key = `rate:contact:${ip}`;
     const count = await redis.incr(key);
     if (count === 1) await redis.expire(key, 3600);

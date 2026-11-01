@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { clientIp } from "@/lib/http/clientIp";
 import { issueOtpCode } from "@/lib/otp";
 import { redis } from "@/lib/redis";
 import { otpSendSchema } from "@/lib/validations/phase2";
@@ -26,12 +27,6 @@ const MAX_PER_EMAIL_HOUR = 3;
  * `OTP_MAX_PER_IP_HOUR` raises it further for a launch or a large intake session.
  */
 const MAX_PER_IP_HOUR = Number(process.env.OTP_MAX_PER_IP_HOUR) || 30;
-
-function clientIp(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return request.headers.get("x-real-ip") ?? "unknown";
-}
 
 export async function POST(request: NextRequest) {
   try {
