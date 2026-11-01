@@ -642,10 +642,46 @@ audit-log viewer, and the role context provider. Razorpay is built and gated beh
   limiters in `/api/contact` and `/api/analysis/explain` take `[0]` and are **bypassable
   with one forged header**. `scripts/verifyLoginThrottle.ts` pins all of it (27 checks) and
   already caught a `>` that should have been `>=`.
-  **Still outstanding from that incident:** bcrypt is on the event loop (move it to a
-  `worker_threads` pool or native `bcrypt`, which also lets the login timing be equalised
-  to close the user-enumeration oracle), Caddy has no rate limit, no container has a memory
-  limit, and `docker-compose.yml` / `Dockerfile` exist only on the server.
+  **Fixed since:** hashing now runs in worker threads (below), login timing is equalised via
+  `compareAgainstDecoy`, and `refresh` / `register` / `reset-password` are metered too.
+  **Still outstanding:** Caddy has no rate limit (needs a custom `xcaddy` build), no container
+  has a memory limit, `docker-compose.yml` / `Dockerfile` exist only on the server, and the
+  image is still built on the production box.
+- **Password hashing runs in worker threads — `src/lib/password/hashPool.ts`. Do not call
+  bcryptjs directly again.** bcryptjs is pure JavaScript, so a cost-12 hash blocks whichever
+  thread runs it; on the main thread that is the one serving every page, API response and
+  Socket.io frame. Measured during a compare: event loop available **10 % → 90 %**.
+  Three things are load-bearing. The worker is built from an **inline source string**, not a
+  file path, because Next.js bundles server code and a sibling worker file is not guaranteed to
+  exist in `.next/` — it would fail only in production, only on login. Workers are **`ref()`d
+  while busy and `unref()`d while idle**, and it must be both: permanently referenced hangs every
+  seeding script that hashes a password, permanently unreferenced empties the event loop and
+  **exits the process mid-hash** (exit code 0, half the output, no error — the first run of the
+  verify script did exactly that). And it **falls back to in-process hashing** rather than
+  failing a login, logging loudly, with `KCA_DISABLE_HASH_POOL=1` as the operational escape
+  hatch. Hashes are unchanged bcrypt (`$2b$` from bcryptjs v3; `$2a$` rows verify identically).
+  `scripts/verifyHashPool.ts` pins it and must be run BOTH ways — the fallback is a real code
+  path, and its 10 % reading is what makes the pool's 90 % trustworthy rather than an artefact
+  of the measurement.
+- **`clientIp` (`src/lib/http/clientIp.ts`) reads the LAST `X-Forwarded-For` hop, and three
+  places used to read the first.** Caddy appends, so the leftmost entry is attacker-controlled
+  text. `contact` and `otp/send` had limits that never fired, and — worst — **`writeAuditLog`
+  stored whatever address the caller sent**, in the one record meant to prove who touched a
+  child's data.
+- **Inbound socket events have a per-connection budget** (`installEventBudget` in
+  `src/lib/socket/server.ts`). 23 handlers had none, so any logged-in student could flood the
+  same single event loop. It hangs off `socket.use`, socket.io's inbound-packet hook, so it
+  covers every handler including ones added later.
+- **`Permissions-Policy` is set only OUTSIDE the class room**, inside the existing `isClassRoom`
+  carve-out in `server.mjs`. `camera=(self)` does **not** delegate to a cross-origin iframe, so a
+  global camera/microphone denial leaves the video class rendering perfectly and simply never
+  getting a camera — silent breakage that surfaces in a real lesson with a child waiting.
+- **Expired sessions are pruned by `scripts/pruneSessions.ts`, not by anything automatic.**
+  A row per login, a 7-day refresh token, and removal only on logout/reset/erasure. After the
+  attack the table held **1,879 rows, 1,716 of them live and all belonging to one student
+  account** — a rate limit stops new tokens being minted but cannot reach ones already issued,
+  and **changing a password does not revoke them** (`/api/auth/refresh` looks the token up in the
+  table and never consults the password). `--user=<username>` is the revoke path.
 - **A refresh token carries a `jti`.** Without it the signed payload was
   `{userId, username, role}` + `iat`/`exp`, all whole **seconds**, so two logins by one
   account in the same second produced a byte-identical token — and
@@ -808,6 +844,9 @@ npx tsx scripts/verifyEndCleanly.ts    # a truncated AI answer ends tidily and l
 npx tsx scripts/verifyMarkdownHtml.ts  # the PDFs render markdown instead of printing ** and -
 npx tsx scripts/verifyClock.ts         # the running clock belongs to the player whose move it is
 npx tsx scripts/verifyLoginThrottle.ts # the login flood that took the site down stays capped
+npx tsx scripts/verifyHashPool.ts      # hashing stays OFF the event loop (run with and without
+                                       #   KCA_DISABLE_HASH_POOL=1 — both are real code paths)
+npx tsx --env-file=.env.local scripts/pruneSessions.ts   # expired sessions; --user=<name> revokes one account's
 npx tsx --env-file=.env.production scripts/verifyJaas.ts   # a broken JaaS key vs no key at all
 
 # Housekeeping and operations (run against the real database / server).
