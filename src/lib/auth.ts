@@ -2,7 +2,18 @@ import { randomBytes, randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import type { SignOptions } from "jsonwebtoken";
 import type { Role } from "@prisma/client";
-import { compareInPool, hashInPool } from "@/lib/password/hashPool";
+// RELATIVE, with the explicit `.ts` extension — not the `@/` alias, and not extensionless.
+//
+// This file is loaded two completely different ways. Next bundles it for the API routes,
+// where `@/` resolves fine. But `server.mjs` also does `await import('./src/lib/socket/
+// server.js')`, which is raw Node ESM with no bundler and no tsconfig path mapping, and that
+// chain reaches here through `socket/server.ts`'s `import … from "../auth.ts"`.
+//
+// An `@/` import here therefore throws `Cannot find package '@/lib'` at RUNTIME and takes the
+// whole Socket.io server down with it — live games, clocks, class rooms, presence and
+// notifications — while `tsc`, `eslint` and `npm run build` all pass, because every one of
+// those goes through the bundler. Only starting the server catches it.
+import { compareInPool, hashInPool } from "./password/hashPool.ts";
 
 export type TokenPayload = {
   userId: string;
