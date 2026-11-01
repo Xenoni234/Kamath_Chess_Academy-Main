@@ -663,6 +663,26 @@ audit-log viewer, and the role context provider. Razorpay is built and gated beh
   `scripts/verifyHashPool.ts` pins it and must be run BOTH ways — the fallback is a real code
   path, and its 10 % reading is what makes the pool's 90 % trustworthy rather than an artefact
   of the measurement.
+- **Anything reachable from `server.mjs` must use RELATIVE imports with an explicit `.ts`
+  extension — never the `@/` alias.** `server.mjs` does `await import('./src/lib/socket/
+  server.js')`, which is raw Node ESM: no bundler, no tsconfig path mapping. That graph is 19
+  files deep and reaches `src/lib/auth.ts` via `socket/server.ts`'s `import … from "../auth.ts"`.
+  An `@/` import anywhere in it throws `Cannot find package '@/lib'` at RUNTIME and takes the
+  **entire Socket.io server** with it — live games, clocks, class rooms, presence, notifications.
+  **`npx tsc --noEmit`, `npx eslint src` and `npm run build` all pass**, because every one of
+  them resolves through the bundler; only starting the server catches it. I shipped exactly this
+  in `auth.ts` and it reached `main` before `npm run dev` surfaced it.
+- **A client-component page cannot hold a `hasRole` guard, so it needs a server wrapper.**
+  `hasRole` runs on the server. `admin/website` and `admin/games` were `"use client"` with no
+  wrapper, leaving `proxy.ts` as their ONLY role check — while Next.js 16.2.9 was shipping a
+  critical middleware/proxy bypass. The pattern, already used by `admin/users`, `payments`,
+  `contact`, `audit` and `invite-codes`, is a server `page.tsx` that reads the cookie, verifies
+  the token, calls `hasRole`, and renders a `*Client.tsx` sibling.
+  **A page must gate exactly as tightly as the API it calls.** `/api/admin/site` is HEAD-only
+  while `proxy.ts` admits HR to all of `/dashboard/admin`, so an HR user reached the website
+  editor and watched every request fail — gating looser than the API reads as a broken feature,
+  not a refusal. `proxy.ts` now narrows that path, as it already did for `/dashboard/admin/payments`.
+  `scripts/verifyRolePages.ts` pins the whole matrix (42 checks) and needs no database.
 - **`clientIp` (`src/lib/http/clientIp.ts`) reads the LAST `X-Forwarded-For` hop, and three
   places used to read the first.** Caddy appends, so the leftmost entry is attacker-controlled
   text. `contact` and `otp/send` had limits that never fired, and — worst — **`writeAuditLog`
@@ -847,6 +867,7 @@ npx tsx scripts/verifyLoginThrottle.ts # the login flood that took the site down
 npx tsx scripts/verifyHashPool.ts      # hashing stays OFF the event loop (run with and without
                                        #   KCA_DISABLE_HASH_POOL=1 — both are real code paths)
 npx tsx --env-file=.env.local scripts/pruneSessions.ts   # expired sessions; --user=<name> revokes one account's
+npx tsx --env-file=.env.local scripts/verifyRolePages.ts # † every role page refuses the roles its API refuses
 npx tsx --env-file=.env.production scripts/verifyJaas.ts   # a broken JaaS key vs no key at all
 
 # Housekeeping and operations (run against the real database / server).
