@@ -64,6 +64,11 @@ const MATRIX: Array<{ path: string; allowed: Role[]; api: string }> = [
   { path: "/dashboard/admin/audit", allowed: ["HEAD"], api: "/api/admin/audit → HEAD" },
   { path: "/dashboard/head", allowed: ["HEAD"], api: "head dashboard" },
   { path: "/dashboard/hr", allowed: ["HR", "HEAD"], api: "hr dashboard" },
+  // Guarded with an inline role comparison rather than `hasRole`, which is why a grep for the
+  // helper missed it. Pinned here so the behaviour is checked rather than the spelling.
+  { path: "/dashboard/schedule", allowed: ["HR", "HEAD", "COACH"], api: "POST /api/classes → HR, HEAD, COACH" },
+  { path: "/dashboard/roster", allowed: ["COACH", "HR", "HEAD"], api: "coach roster" },
+  { path: "/dashboard/children", allowed: ["PARENT", "HR", "HEAD"], api: "parent's children" },
 ];
 
 const ALL_ROLES: Role[] = ["STUDENT", "PARENT", "COACH", "HR", "HEAD"];

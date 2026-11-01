@@ -406,8 +406,16 @@ Run through these on the live domain before announcing:
 
 **Update / redeploy** (after pushing new code):
 ```bash
-cd /opt/kca && git pull && docker compose up -d --build
+cd /opt/kca && ./scripts/redeploy.sh
 ```
+
+**Do not use `docker compose up -d --build` by hand.** It builds `app` and `worker` in
+PARALLEL — two Next.js builds at once on 2 vCPUs, beside the live stack still serving
+traffic. That wedged this server for six minutes (`journald`: "Under memory pressure,
+flushing caches" until it stopped logging entirely) and needed a reboot from the hosting
+panel. `redeploy.sh` builds one image at a time, keeps the old containers up until the new
+image is ready, waits for `/api/health` from inside the compose network, and re-execs itself
+if the pull changed the script. Slower, and it finishes.
 
 **Rollback** (previous version):
 ```bash
@@ -417,9 +425,39 @@ cd /opt/kca && git checkout <last-good-commit> && docker compose up -d --build
 **Logs:** `docker compose logs -f app` / `worker`.
 **Restart one service:** `docker compose restart app`.
 
+**Scheduled maintenance:**
+
+`UserSession` rows are created on every login and removed only on logout, password reset or
+erasure — so every user who closes the tab instead of signing out leaves a row behind for a
+7-day refresh token's lifetime, permanently. After the 10 Oct 2026 login flood the table held
+1,907 rows for a handful of real accounts. Prune daily:
+
+```bash
+crontab -e
+# then add:
+0 4 * * * cd /opt/kca && /usr/bin/docker compose exec -T app npx tsx scripts/pruneSessions.ts --yes >> /var/log/kca-prune.log 2>&1
+```
+
+Deliberately a cron job rather than a delete during login: adding a write to that route is
+exactly what made it expensive enough to take the platform down. Run it by hand first without
+`--yes` to see what it would remove.
+
 **Backups:**
+- **The four files that exist ONLY on this server** — `.env.production`, `Dockerfile`,
+  `docker-compose.yml` and `Caddyfile`. `.env.production` holds every secret the platform
+  runs on (JWT signing keys, Supabase, Resend, Groq, Lichess, JaaS) and exists nowhere else;
+  the other three are the production topology, and the compose file has been hand-edited on
+  the server. When the VPS subscription lapsed in Oct 2026 and Hostinger started a 13-day
+  deletion countdown, these were the only things genuinely at risk. Copy them off the box:
+  ```bash
+  scp root@<server-ip>:/opt/kca/{.env.production,Dockerfile,docker-compose.yml,Caddyfile} ~/kca-server-config/
+  ```
+  Keep that directory out of git — `.env.production` must never be committed.
 - Postgres — **Supabase does automated backups**; enable/verify Point-in-Time Recovery in the
   Supabase dashboard. This is your real data; nothing on the VPS is authoritative for it.
+  Note the connection string can change: a paused free-tier project that is later resumed may
+  come back on a different pooler host, and a stale `DATABASE_URL` in `.env.production` lets
+  the app start and pass its health check while failing every query.
 - Redis (BullMQ) — transient job state; the `redis-data` volume with AOF is enough.
 - Neo4j (if used) — the `neo4j-data` volume; it's a rebuildable cache, low priority.
 
